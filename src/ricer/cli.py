@@ -1,4 +1,4 @@
-"""Command line: ricer instant | reroll | setup | revert | status | wallpapers | widgets."""
+"""Command line: ricer instant | reroll | default | setup | revert | status | wallpapers | widgets."""
 from __future__ import annotations
 
 import argparse
@@ -104,6 +104,12 @@ def build_parser() -> argparse.ArgumentParser:
         "reroll", help="another look with the current look's dials",
         description="Like 'instant', but dials you leave out stay as they are in the current look.")
     _look_options(reroll, "set cool, ease and warmth at once (single dials still override)")
+
+    default = commands.add_parser(
+        "default", help="return to the look you saved as your default",
+        description="With no action, applies your default look. 'set' saves the look that is "
+                    "applied now as the default; 'show' prints it; 'clear' forgets it.")
+    default.add_argument("action", nargs="?", choices=("set", "show", "clear"))
 
     commands.add_parser("setup", help="install the optional GNOME extensions ricer can use")
 
@@ -234,6 +240,52 @@ def cmd_look(app: App, args, out) -> int:
     return 0
 
 
+def cmd_default(app: App, args, out) -> int:
+    """Save the current look as the default, or go back to the saved one."""
+    engine = app.engine
+    if args.action == "set":
+        look = engine.save_default()
+        if look is None:
+            print("There is no look to save yet. Apply one with 'ricer instant' first.", file=sys.stderr)
+            return 1
+        print(f"Saved as your default look:\n{describe(look)}\n"
+              "Return to it at any time with: ricer default", file=out)
+        return 0
+    if args.action == "clear":
+        print("Default look forgotten." if engine.clear_default() else "There was no default look.",
+              file=out)
+        return 0
+
+    look = engine.default_look()
+    if look is None:
+        if app.paths.default_file.exists():
+            print("The saved default look cannot be read by this version of ricer. "
+                  "Apply a look you like and run 'ricer default set' again.", file=sys.stderr)
+        else:
+            print("No default look saved yet. Apply a look you like, then run 'ricer default set'.",
+                  file=sys.stderr)
+        return 1
+    print(describe(look), file=out)
+    if args.action == "show":
+        return 0
+    if not app.capabilities().gnome:
+        print("ricer only supports the GNOME desktop; nothing was changed.", file=sys.stderr)
+        return 2
+    if not Path(look.wallpaper).is_file():
+        print(f"Your default look's wallpaper is no longer there: {look.wallpaper}", file=sys.stderr)
+        return 1
+    try:
+        result = engine.apply(look, app.capabilities())
+    except ApplyError as error:
+        print(error, file=sys.stderr)
+        return 1
+    for notice in result.notices:
+        print(f"note: {notice}", file=out)
+    print("Applied your default look." if result.changed
+          else "No changes: your default look is already applied.", file=out)
+    return 0
+
+
 def cmd_setup(app: App, _args, out) -> int:
     backend = app.backend
     if not app.capabilities().extensions_allowed:
@@ -274,8 +326,15 @@ def cmd_revert(app: App, args, out) -> int:
 
 
 def cmd_status(app: App, _args, out) -> int:
-    look = app.engine.current_look()
+    look, default = app.engine.current_look(), app.engine.default_look()
     print(describe(look) if look else "No look applied by ricer yet.", file=out)
+    if default is None:
+        print("\nDefault look: none saved ('ricer default set' keeps the current one)", file=out)
+    elif default == look:
+        print("\nDefault look: this one", file=out)
+    else:
+        print(f"\nDefault look: {Path(default.wallpaper).name}, seed {default.seed} "
+              "('ricer default' returns to it)", file=out)
     print("\nThis desktop:", file=out)
     for feature, available, note in app.capabilities().report():
         print(f"  {'yes' if available else 'no ':3}  {feature}{f' ({note})' if note else ''}", file=out)
@@ -326,8 +385,9 @@ def cmd_widgets(app: App, args, out) -> int:
     return 0
 
 
-COMMANDS = {"instant": cmd_look, "reroll": cmd_look, "setup": cmd_setup, "revert": cmd_revert,
-            "status": cmd_status, "wallpapers": cmd_wallpapers, "widgets": cmd_widgets}
+COMMANDS = {"instant": cmd_look, "reroll": cmd_look, "default": cmd_default, "setup": cmd_setup,
+            "revert": cmd_revert, "status": cmd_status, "wallpapers": cmd_wallpapers,
+            "widgets": cmd_widgets}
 
 
 def main(argv=None, app: App | None = None, out=None) -> int:

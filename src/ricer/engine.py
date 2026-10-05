@@ -272,6 +272,28 @@ class Engine:
         """Fingerprints of the looks applied recently, newest first."""
         return self.load_state().get("history", [])
 
+    # -- the default look -----------------------------------------------
+    # Stored whole, not as dials and a seed: a seed only leads back to a look while the
+    # wallpaper folder and the generator stay as they were, and a default has to outlast both.
+    def save_default(self) -> Look | None:
+        """Keep the current look as the one to come back to. None if no look is applied."""
+        look = self.current_look()
+        if look is not None:
+            _put(self.paths.default_file, json.dumps(look.to_dict(), indent=2) + "\n")
+        return look
+
+    def default_look(self) -> Look | None:
+        """The saved default look; None if there is none or this version cannot read it."""
+        try:
+            return Look.from_dict(json.loads(self.paths.default_file.read_text()))
+        except (OSError, ValueError):                        # LookError is a ValueError
+            return None
+
+    def clear_default(self) -> bool:
+        existed = self.paths.default_file.exists()
+        self.paths.default_file.unlink(missing_ok=True)
+        return existed
+
     # -- apply / revert -------------------------------------------------
     def _set(self, path: str, value: str | None) -> None:
         if value is None:

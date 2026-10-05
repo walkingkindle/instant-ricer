@@ -33,6 +33,11 @@ ricer reroll --keep wallpaper,style   # keep those parts, reroll the rest
 ricer instant --all 6 --seed 428327877   # an earlier look, exactly
 ```
 
+Found one you like? `ricer default set` keeps it, and `ricer default` returns to it from
+any other look. It is stored as the look itself, not as dials and a seed, so it survives
+changes to the wallpaper folder and to ricer. A look also simply stays: nothing changes,
+across logins and reboots, until you run ricer again.
+
 Some things are rules, not odds. Text stays readable: a widget gets a card behind it when
 its spot on the wallpaper is busy or bright. Widgets never overlap each other or the dock.
 From ease 7 the dock never hides. At cool 1 and 2 the desktop stays nearly empty.
@@ -147,6 +152,7 @@ their artists and are for your own desktop.
 ricer instant [--cool N] [--ease N] [--warmth N] [--chaos N] [--all N]
               [--seed N] [--keep PARTS] [--dry-run] [--json]
 ricer reroll  [the same options]       dials you leave out stay as in the current look
+ricer default [set | show | clear]     return to your saved look; `set` saves the current one
 ricer setup                            install the optional extensions
 ricer revert [--all]
 ricer status

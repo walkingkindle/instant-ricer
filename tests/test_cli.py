@@ -1,7 +1,9 @@
 import io
 import json
+import random
 
 import pytest
+from PIL import Image
 
 from ricer import cli, wallpapers
 from ricer.backends import FakeBackend
@@ -203,6 +205,73 @@ def test_revert_and_status(app):
     run(app, "instant", "--all", "7")
     run(app, "instant", "--all", "3")
     assert "Reverted" in run(app, "revert", "--all")[1] and app.backend.values == {}
+
+
+# -- the default look -------------------------------------------------------------------------
+
+def test_default_needs_a_look_first(app, capsys):
+    assert run(app, "default")[0] == 1
+    assert "No default look saved yet" in capsys.readouterr().err
+    assert run(app, "default", "set")[0] == 1
+    assert "no look to save yet" in capsys.readouterr().err
+    assert run(app, "default", "show")[0] == 1
+    assert run(app, "default", "clear") == (0, "There was no default look.\n")
+    assert app.backend.values == {}
+
+
+def test_a_look_can_be_saved_as_the_default_and_returned_to(app):
+    run(app, "instant", "--all", "7", "--seed", "9")
+    code, text = run(app, "default", "set")
+    assert code == 0 and "Saved as your default look:" in text and "seed 9" in text
+    assert "ricer default" in text and "Default look: this one" in run(app, "status")[1]
+    liked = dict(app.backend.values)
+
+    run(app, "instant", "--all", "3", "--seed", "4")
+    assert app.backend.values != liked
+    status = run(app, "status")[1]
+    assert "Default look: " in status and "seed 9" in status and "'ricer default' returns to it" in status
+
+    code, text = run(app, "default")
+    assert code == 0 and "Applied your default look." in text and "seed 9" in text
+    assert app.backend.values == liked
+    assert "No changes: your default look is already applied." in run(app, "default")[1]
+    assert run(app, "default", "show")[1].startswith("cool 7 · ease 7 · warmth 7 · chaos 5 · seed 9")
+
+    assert run(app, "default", "clear") == (0, "Default look forgotten.\n")
+    assert "none saved" in run(app, "status")[1] and run(app, "default")[0] == 1
+
+
+def test_the_default_does_not_depend_on_the_wallpaper_folder_staying_the_same(app, capsys):
+    run(app, "instant", "--cool", "8", "--warmth", "10", "--chaos", "1", "--seed", "3")
+    run(app, "default", "set")
+    liked = dict(app.backend.values)
+    assert "warm.png" in liked["/org/gnome/desktop/background/picture-uri"]
+
+    # a new, better-matching image arrives (as warm, and with the detail these dials favour):
+    # the same dials and seed now lead somewhere else...
+    rng = random.Random(1)
+    textured = Image.new("RGB", (192, 108))
+    textured.putdata([(rng.randrange(170, 256), rng.randrange(70, 170), rng.randrange(10, 60))
+                      for _ in range(192 * 108)])
+    textured.save(app.paths.wallpapers / "warmer.png")
+    _, text = run(app, "instant", "--cool", "8", "--warmth", "10", "--chaos", "1", "--seed", "3")
+    assert "wallpaper  warmer.png" in text
+    # ...but the default is the look itself, not a recipe for it
+    assert run(app, "default")[0] == 0 and app.backend.values == liked
+
+    run(app, "instant", "--all", "2", "--seed", "8")
+    elsewhere = dict(app.backend.values)
+    (app.paths.wallpapers / "warm.png").unlink()
+    assert run(app, "default")[0] == 1 and app.backend.values == elsewhere
+    assert "no longer there" in capsys.readouterr().err
+
+
+def test_a_default_saved_by_another_version_is_reported_not_crashed_on(app, capsys):
+    app.paths.default_file.parent.mkdir(parents=True, exist_ok=True)
+    app.paths.default_file.write_text(json.dumps({"dials": {"cool": 5}, "bar_style": "cards"}))
+    assert run(app, "default")[0] == 1
+    assert "cannot be read by this version" in capsys.readouterr().err
+    assert "none saved" in run(app, "status")[1]
 
 
 # -- setup ------------------------------------------------------------------------------------

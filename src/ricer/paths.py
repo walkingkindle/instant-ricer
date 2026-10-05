@@ -32,6 +32,10 @@ class Paths:
         return self.config / "state.json"
 
     @property
+    def default_file(self) -> Path:
+        return self.config / "default.json"
+
+    @property
     def widgets_file(self) -> Path:
         return self.config / "widgets.json"
 

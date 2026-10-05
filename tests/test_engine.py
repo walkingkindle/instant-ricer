@@ -366,3 +366,25 @@ def test_widget_specs_reach_the_file_unchanged(look, full_caps, paths):
     config = json.loads(build_plan(odd, full_caps, paths).files[paths.widgets_file])
     assert config["widgets"] == [{"type": "ornament", "design": "sigil", "anchor": "bottom-left",
                                   "options": {"size": 200, "seed": 7, "fill": 0.0, "align": "left"}}]
+
+
+def test_the_default_look_is_saved_whole_and_outlasts_other_looks(look, plain, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    assert eng.save_default() is None and eng.default_look() is None     # nothing applied yet
+    eng.apply(look, full_caps)
+    assert eng.save_default() == look and eng.default_look() == look
+    assert json.loads(paths.default_file.read_text())["seed"] == look.seed
+    eng.apply(plain, full_caps)
+    assert eng.default_look() == look                        # later looks do not touch it
+    eng.revert(everything=True)
+    assert eng.default_look() == look                        # nor does undoing everything
+    assert eng.clear_default() is True and eng.default_look() is None
+    assert eng.clear_default() is False
+
+
+def test_an_unreadable_default_counts_as_none(paths, backend):
+    paths.default_file.parent.mkdir(parents=True)
+    paths.default_file.write_text("{ not json")
+    assert Engine(backend, paths).default_look() is None
+    paths.default_file.write_text(json.dumps({"dials": {"cool": 5}, "bar_style": "cards"}))
+    assert Engine(backend, paths).default_look() is None
