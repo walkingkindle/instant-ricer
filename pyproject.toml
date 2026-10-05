@@ -34,5 +34,10 @@ where = ["src"]
 [tool.setuptools.package-data]
 ricer = ["data/*.tmpl"]
 
+# The manual page. pip puts it under the install prefix (share/man/man1), which is where
+# man looks for a command found in the matching bin directory; pipx links it into place too.
+[tool.setuptools.data-files]
+"share/man/man1" = ["man/ricer.1"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

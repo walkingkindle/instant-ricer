@@ -12,6 +12,8 @@ ricer instant --cool 8 --ease 4 --warmth 7
 command again and you get another wallpaper, other widgets in other designs and places.
 Each run prints a seed, and that seed brings its look back exactly.
 
+`ricer help` lists commands to try, and `man ricer` is the full manual.
+
 ## The dials
 
 Each goes from 1 to 10. Dials you leave out are 5.
@@ -38,8 +40,9 @@ any other look. It is stored as the look itself, not as dials and a seed, so it 
 changes to the wallpaper folder and to ricer. A look also simply stays: nothing changes,
 across logins and reboots, until you run ricer again.
 
-Some things are rules, not odds. Text stays readable: a widget gets a card behind it when
-its spot on the wallpaper is busy or bright. Widgets never overlap each other or the dock.
+Some things are rules, not odds. Text stays readable: where the wallpaper under a widget is
+busy or bright, the widget gets a card behind it, and large display text at least a dark
+outline. Widgets do not overlap each other and keep clear of the dock.
 From ease 7 the dock never hides. At cool 1 and 2 the desktop stays nearly empty.
 
 ## What a look is made of
@@ -121,13 +124,19 @@ ricer wallpapers fetch --count 20
 ricer instant
 ```
 
-or from a checkout:
+pipx 1.3 and newer also link the manual into `~/.local/share/man`, so `man ricer` works
+straight away. With plain pip the manual lands under the install prefix (`share/man/man1`),
+where `man` finds it for any command on your `PATH`.
+
+Or from a checkout, linking the command and its manual into `~/.local`:
 
 ```
 git clone https://github.com/walkingkindle/instant-ricer && cd instant-ricer
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install -e .
-.venv/bin/ricer status
+ln -s "$PWD/.venv/bin/ricer" ~/.local/bin/ricer
+mkdir -p ~/.local/share/man/man1 && ln -s "$PWD/man/ricer.1" ~/.local/share/man/man1/
+ricer status
 ```
 
 ## Wallpapers
@@ -158,6 +167,8 @@ ricer revert [--all]
 ricer status
 ricer wallpapers list | add FILE... | fetch [--count N] [--query WORDS]
 ricer widgets start | stop
+ricer help [COMMAND]                   commands to try, or one command's options
+man ricer                              the manual
 ```
 
 - `--keep` takes a comma-separated list of `wallpaper`, `style`, `widgets`, `layout`, `bar`
@@ -220,6 +231,10 @@ one (a GUI, a model acting as art director) can drive the desktop the same way.
 
 Everything that decides is pure and tested without a desktop. Widgets are tested by drawing
 them offscreen; the window tests are skipped when there is no display.
+
+The manual page, `man/ricer.1`, is written by hand. Tests check it against the real command
+line: every command, option and default it names must exist, and every example in it and
+in `ricer help` must parse.
 
 Visual work is judged by eye, with three tools:
 

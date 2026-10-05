@@ -1,0 +1,364 @@
+.\" Manual page for ricer. Kept in step with the command line by tests/test_manpage.py.
+.TH RICER 1 "2026-10-05" "ricer 0.2.0" "User Commands"
+.SH NAME
+ricer \- compose and apply a different GNOME desktop look on every run
+.SH SYNOPSIS
+.B ricer instant
+[\fB\-\-cool\fR \fIN\fR]
+[\fB\-\-ease\fR \fIN\fR]
+[\fB\-\-warmth\fR \fIN\fR]
+[\fB\-\-chaos\fR \fIN\fR]
+[\fB\-\-all\fR \fIN\fR]
+[\fB\-\-seed\fR \fIN\fR]
+[\fB\-\-keep\fR \fIPARTS\fR]
+[\fB\-\-dry\-run\fR]
+[\fB\-\-json\fR]
+.br
+.B ricer reroll
+[\fIthe same options\fR]
+.br
+.B ricer default
+[\fBset\fR | \fBshow\fR | \fBclear\fR]
+.br
+.B ricer revert
+[\fB\-\-all\fR]
+.br
+.B ricer status
+.br
+.B ricer setup
+.br
+.B ricer wallpapers
+\fBlist\fR | \fBadd\fR \fIFILE\fR... | \fBfetch\fR [\fB\-\-count\fR \fIN\fR] [\fB\-\-query\fR \fIWORDS\fR]
+.br
+.B ricer widgets
+\fBstart\fR | \fBstop\fR
+.br
+.B ricer help
+[\fICOMMAND\fR [\fIACTION\fR]]
+.br
+.B ricer \-\-version
+.SH DESCRIPTION
+.B ricer
+composes a whole desktop look for GNOME and applies it at once, with no logout:
+wallpaper, colours, top bar, dock, terminal colours, widgets on the desktop and
+widgets inside the top bar.
+.PP
+Four dials steer it. They do not select a look; they tilt the odds of what a run
+produces. Running the same command again gives another wallpaper and other widgets,
+in other designs and other places. Every run prints a
+.IR seed ,
+and the same dials with that seed give the same look again.
+.PP
+.B ricer
+records the previous value of everything it changes, so a look can be undone
+exactly. See
+.B ricer revert
+below.
+.SH THE DIALS
+Each dial takes a whole number from 1 to 10. A dial that is left out is 5 for
+.BR "ricer instant" ,
+and keeps its current value for
+.BR "ricer reroll" .
+.TP
+\fB\-\-cool\fR \fIN\fR
+Flashiness, from calm and minimal (1) to loud and flashy (10). Higher values make
+more widgets on the desktop likely (about
+.I N
+minus two), along with bolder designs, ornaments, saturated colour, gradients,
+blur and a flashier top bar.
+.TP
+\fB\-\-ease\fR \fIN\fR
+Practicality, from looks first (1) to usability first (10). Higher values put
+information into the top bar (system stats from about 5, a media player from
+about 7), and favour larger text, more opaque cards, calmer wallpapers and tidy
+column layouts.
+.TP
+\fB\-\-warmth\fR \fIN\fR
+Mood, from cold blues (1) to warm ambers (10). Higher values favour warm wallpapers
+and hues, round shapes, serif type, an analogue clock and a greeting. Lower values
+favour sharp outlined cards, mono and condensed type, a digital clock and system
+stats.
+.TP
+\fB\-\-chaos\fR \fIN\fR
+How far a run may stray from what the other three dials suggest. At 1 a run stays
+close to their favourites, in wallpapers as in everything else. At 10 nearly
+anything in the vocabulary can come up.
+.TP
+\fB\-\-all\fR \fIN\fR
+Set cool, ease and warmth to
+.I N
+together. A single dial given as well overrides it. Chaos is not affected.
+.PP
+Some things are rules and not odds. Text stays readable: wherever the wallpaper
+under a widget is busy or bright, the widget gets a card behind it, and large
+display text at least a dark outline. Widgets do not overlap one another and keep
+clear of the dock. From ease 7 up the dock never hides. At cool 1 and 2 there is
+at most one widget on the desktop.
+.SH COMMANDS
+.SS ricer instant
+Compose a new look from the dials and apply it. Prints the look, any feature that
+was skipped because this desktop lacks it, and the command that brings the same
+look back.
+.TP
+\fB\-\-seed\fR \fIN\fR
+Use this seed and draw none. With the same dials, the same wallpaper folder and
+the same screen size, this gives the same look. Without it,
+.B ricer
+passes over seeds that lead to a wallpaper used in the last three looks.
+.TP
+\fB\-\-keep\fR \fIPARTS\fR
+Carry parts of the current look over and draw the rest anew.
+.I PARTS
+is a comma\-separated list of
+.BR wallpaper ,
+.B style
+(which includes the colours),
+.BR widgets ,
+.BR layout ,
+.B bar
+and
+.BR dock .
+.B layout
+alone keeps the layout template; together with
+.B widgets
+it also keeps every widget in its place. Needs a look to be applied already.
+.TP
+.B \-\-dry\-run
+Print the look and what would be skipped, and change nothing.
+.TP
+.B \-\-json
+Print the look in full as JSON.
+.SS ricer reroll
+The same as
+.BR "ricer instant" ,
+except that dials you leave out keep the values of the current look. It takes the
+same options. Fails if no look is applied.
+.SS ricer default
+With no action, apply your default look.
+.TP
+.B set
+Save the look that is applied now as the default.
+.TP
+.B show
+Print the default look.
+.TP
+.B clear
+Forget the default look.
+.PP
+The default is stored as the complete look and not as dials and a seed, so it does
+not change when wallpapers are added or
+.B ricer
+is updated. It only needs its own wallpaper file to still exist.
+.SS ricer revert
+Undo the last look: every setting and file goes back to what it was before that
+look was applied, and the look before it becomes the current one again.
+.TP
+.B \-\-all
+Undo everything
+.B ricer
+has ever changed, restoring each setting to the value it had before
+.B ricer
+first touched it. The history of recent looks is forgotten. The default look is
+kept.
+.SS ricer status
+Print the current look, whether a default look is saved, which optional features
+this desktop supports, and how many wallpapers the library holds.
+.SS ricer setup
+For each optional GNOME Shell extension that is not installed (User Themes, Blur
+my Shell, Vitals, Media Controls), ask GNOME Shell to install it from
+extensions.gnome.org. GNOME shows its own dialog for each one, and nothing is
+installed unless you confirm it there. If GNOME has all user extensions switched
+off, they are switched back on, and User Themes and Blur my Shell are enabled if
+they were installed but switched off. The current look is then applied again so
+that it uses what has become available.
+.SS ricer wallpapers
+.TP
+.B list
+List every wallpaper with its measured warmth (\-1 cold to +1 warm), colour,
+detail and brightness (each 0 to 1).
+.TP
+\fBadd\fR \fIFILE\fR...
+Copy images (jpg, jpeg, png or webp) into the library.
+.TP
+\fBfetch\fR [\fB\-\-count\fR \fIN\fR] [\fB\-\-query\fR \fIWORDS\fR]
+Download up to
+.I N
+new images (12 if not given) from wallhaven.cc that match
+.I WORDS
+("anime scenery" if not given). Only images from its anime category that are
+rated safe for work are requested, in 16:9 and at least 1920x1080, the most
+favourited first. Images the library already has are skipped. The images belong
+to their artists.
+.SS ricer widgets
+\fBstart\fR or \fBstop\fR the process that draws the desktop widgets.
+.B ricer instant
+starts and stops it as needed; these are for troubleshooting.
+.SS ricer help
+With no argument, print commands to try, the dials and a one\-line summary of
+every command. With a command, and for
+.B wallpapers
+an action, print its options.
+.SH WHAT A LOOK IS MADE OF
+.TP
+.B Style
+One style is shared by every part of a look: corner radius, how opaque cards are
+(down to no card at all), their border, type weight, typeface (interface,
+condensed, mono, serif or geometric, using fonts that are installed), capitals
+for labels, flat or gradient accents, and text scale. The accent colours come
+from the wallpaper.
+.TP
+.B Desktop widgets
+A clock (one line of digits, stacked digits, an analogue dial, or the time in
+words), a greeting, a calendar (month, week or a single day), a media player
+(card, pill or cover art) for any MPRIS player, system readings (bars, rings or
+one line), progress through the day, week, month and year, and an ornament
+drawn from the seed. Each is placed in one of nine zones of the screen, where
+the wallpaper is calm and its subject stays uncovered.
+.TP
+.B Top bar
+Left as it is, plain and transparent, one floating piece, three floating cards,
+or solid. System stats and a media player can sit in the bar itself.
+.TP
+.B The rest
+The dock's side, hiding, size, indicator and tint; the icon and cursor set; the
+terminal's colours. While desktop widgets are shown, the Home and drive icons
+on the desktop are hidden.
+.SH EXAMPLES
+A new look with every dial at 5:
+.PP
+.RS 4
+.EX
+ricer instant
+.EE
+.RE
+.PP
+Loud and cold; then calm; then anything goes:
+.PP
+.RS 4
+.EX
+ricer instant \-\-cool 9 \-\-warmth 2
+ricer instant \-\-all 3
+ricer instant \-\-all 8 \-\-chaos 10
+.EE
+.RE
+.PP
+See what a run would give without applying it:
+.PP
+.RS 4
+.EX
+ricer instant \-\-cool 7 \-\-dry\-run
+.EE
+.RE
+.PP
+Another look with the same dials; then keep the wallpaper and colours and change
+the rest; then the same but a little warmer:
+.PP
+.RS 4
+.EX
+ricer reroll
+ricer reroll \-\-keep wallpaper,style
+ricer reroll \-\-keep wallpaper \-\-warmth 8
+.EE
+.RE
+.PP
+Bring an earlier look back from the line it printed:
+.PP
+.RS 4
+.EX
+ricer instant \-\-cool 7 \-\-ease 6 \-\-warmth 6 \-\-chaos 5 \-\-seed 1969942044
+.EE
+.RE
+.PP
+Keep the look you have as your default, try others, and return to it:
+.PP
+.RS 4
+.EX
+ricer default set
+ricer instant \-\-all 9
+ricer default
+.EE
+.RE
+.PP
+Undo the last look; undo everything:
+.PP
+.RS 4
+.EX
+ricer revert
+ricer revert \-\-all
+.EE
+.RE
+.PP
+Give the dials more to choose from:
+.PP
+.RS 4
+.EX
+ricer wallpapers fetch \-\-count 20
+ricer wallpapers fetch \-\-query "anime sunset landscape"
+ricer wallpapers list
+.EE
+.RE
+.SH FILES
+.TP
+.I \(ti/Pictures/Wallpapers
+The wallpaper library.
+.TP
+.I \(ti/.config/ricer/state.json
+The current look, the recent looks, and what is needed to undo them.
+.TP
+.I \(ti/.config/ricer/default.json
+The default look.
+.TP
+.I \(ti/.config/ricer/widgets.json
+What the widget process draws. Rewritten by every look; the process follows it.
+.TP
+.I \(ti/.cache/ricer/
+The analysis of each wallpaper, and the widget process's log.
+.TP
+.I \(ti/.local/share/themes/Ricer/
+The generated top\-bar theme.
+.TP
+.I \(ti/.config/autostart/ricer\-widgets.desktop
+Starts the widgets at login. Present only while the look has desktop widgets.
+.SH ENVIRONMENT
+.TP
+.B RICER_WALLPAPERS
+Use this folder as the wallpaper library.
+.TP
+.BR XDG_CONFIG_HOME ", " XDG_CACHE_HOME ", " XDG_DATA_HOME
+Where the files above are kept, if set.
+.SH EXIT STATUS
+.TP
+.B 0
+Success. This includes having nothing to revert.
+.TP
+.B 1
+What was asked could not be done: no wallpapers, no look to reroll or keep parts
+of, no default look, a download or an apply that failed.
+.TP
+.B 2
+The command line was wrong, the desktop is not GNOME, or the desktop could not
+be reached.
+.SH NOTES
+Desktop widgets need an X11 session; GNOME on Wayland does not let a program pin
+a window to the desktop. There, everything else is applied, including the
+widgets in the top bar.
+.PP
+Features that depend on something this desktop lacks are skipped, and
+.B ricer
+says which. The top bar's style needs the User Themes extension, stats in the
+bar need Vitals, a player in the bar needs Media Controls, and blur needs Blur
+my Shell.
+.B ricer setup
+installs them.
+.PP
+Placement keeps widgets off the part of a wallpaper that stands out. That is
+judged from colour, brightness and detail, and is not always what a person would
+call the subject.
+.PP
+The word clock and the greeting are in English only.
+.SH SEE ALSO
+.BR gnome\-extensions (1),
+.BR gsettings (1),
+.BR dconf (1)
+.PP
+Source and issues: https://github.com/walkingkindle/instant\-ricer

@@ -1,4 +1,4 @@
-"""Command line: ricer instant | reroll | default | setup | revert | status | wallpapers | widgets."""
+"""Command line: ricer instant | reroll | default | revert | status | setup | wallpapers | widgets | help."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +20,40 @@ from ricer.wallpapers import Library, NoWallpapersError
 DEFAULT_DIAL = 5
 DEFAULT_FETCH = 12
 ALWAYS_ON = (USER_THEME_UUID, BLUR_UUID)                     # extensions ricer expects to stay enabled
+
+# One line per command, in the order they are listed. Used for --help and for 'ricer help'.
+COMMAND_HELP = {
+    "instant": "generate a new look from the dials and apply it",
+    "reroll": "another look with the current look's dials",
+    "default": "return to the look you saved as your default",
+    "revert": "undo the last look",
+    "status": "show the current look and what this desktop supports",
+    "setup": "install the optional GNOME extensions ricer can use",
+    "wallpapers": "manage the wallpaper library",
+    "widgets": "start or stop the desktop widgets",
+    "help": "show examples to try, or the help for one command",
+}
+# What each dial runs from and to.
+DIAL_HELP = {
+    "cool": ("flashiness", "calm and minimal", "loud and flashy"),
+    "ease": ("practicality", "looks first", "usability first"),
+    "warmth": ("mood", "cold blues", "warm ambers"),
+    "chaos": ("surprise", "close to what the other dials suggest", "anything goes"),
+}
+# Commands worth trying first, each with what it does. Every line here is checked to parse.
+EXAMPLES = (
+    ("ricer instant", "a new look, all dials at 5"),
+    ("ricer instant --cool 9 --warmth 2", "loud and cold"),
+    ("ricer instant --all 3", "calm"),
+    ("ricer instant --all 8 --chaos 10", "anything goes"),
+    ("ricer instant --dry-run", "show a look without applying it"),
+    ("ricer reroll", "same dials, another look"),
+    ("ricer reroll --keep wallpaper,style", "keep those parts, change the rest"),
+    ("ricer default set", "save the look you have now"),
+    ("ricer default", "go back to it"),
+    ("ricer revert", "undo the last look"),
+    ("ricer status", "what is applied, and what this desktop supports"),
+)
 
 
 @dataclass
@@ -70,14 +104,8 @@ def keep_parts(text: str) -> list[str]:
 
 
 def _look_options(parser: argparse.ArgumentParser, all_help: str) -> None:
-    parser.add_argument("--cool", type=dial, metavar="N",
-                        help="flashiness: 1 calm and minimal, 10 loud and flashy")
-    parser.add_argument("--ease", type=dial, metavar="N",
-                        help="practicality: 1 looks first, 10 usability first")
-    parser.add_argument("--warmth", type=dial, metavar="N",
-                        help="mood: 1 cold blues, 10 warm ambers")
-    parser.add_argument("--chaos", type=dial, metavar="N",
-                        help="how far a run may stray from what the other dials suggest")
+    for name, (what, low, high) in DIAL_HELP.items():
+        parser.add_argument(f"--{name}", type=dial, metavar="N", help=f"{what}: 1 {low}, 10 {high}")
     parser.add_argument("--all", type=dial, metavar="N", dest="all_dials", help=all_help)
     parser.add_argument("--seed", type=int, metavar="N",
                         help="get an earlier look back: every run prints its seed")
@@ -90,49 +118,90 @@ def _look_options(parser: argparse.ArgumentParser, all_help: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ricer", description="Instant desktop ricing for GNOME: four dials, a new look every run.")
+        prog="ricer", description="A desktop ricing engine for GNOME: four dials, a new look every run.",
+        epilog="Run 'ricer help' for examples to try, and 'man ricer' for the manual.")
     parser.add_argument("--version", action="version", version=f"ricer {__version__}")
-    commands = parser.add_subparsers(dest="command", required=True, metavar="command")
+    commands = parser.add_subparsers(dest="command", metavar="command")
+    parser.subcommands = commands.choices                    # name -> parser, for 'ricer help NAME'
 
-    instant = commands.add_parser(
-        "instant", help="generate a new look from the dials and apply it",
+    def command(name: str, **options) -> argparse.ArgumentParser:
+        return commands.add_parser(name, help=COMMAND_HELP[name], **options)
+
+    instant = command(
+        "instant",
         description="Each dial goes from 1 to 10; dials you leave out are 5. Every run is "
                     "different. The dials tilt the odds, and --seed brings a look back.")
     _look_options(instant, "set cool, ease and warmth at once (single dials still override)")
 
-    reroll = commands.add_parser(
-        "reroll", help="another look with the current look's dials",
+    reroll = command(
+        "reroll",
         description="Like 'instant', but dials you leave out stay as they are in the current look.")
     _look_options(reroll, "set cool, ease and warmth at once (single dials still override)")
 
-    default = commands.add_parser(
-        "default", help="return to the look you saved as your default",
+    default = command(
+        "default",
         description="With no action, applies your default look. 'set' saves the look that is "
                     "applied now as the default; 'show' prints it; 'clear' forgets it.")
     default.add_argument("action", nargs="?", choices=("set", "show", "clear"))
 
-    commands.add_parser("setup", help="install the optional GNOME extensions ricer can use")
-
-    revert = commands.add_parser("revert", help="undo the last look")
+    revert = command("revert")
     revert.add_argument("--all", action="store_true", dest="everything",
                         help="undo everything ricer ever changed")
 
-    commands.add_parser("status", help="show the current look and what this desktop supports")
+    command("status")
+    command("setup", description="Asks GNOME to install each optional extension that is missing. "
+                                 "GNOME shows its own dialog for each one; nothing is installed "
+                                 "without your confirmation there.")
 
-    walls = commands.add_parser("wallpapers", help="manage the wallpaper library")
+    walls = command("wallpapers")
     wall_commands = walls.add_subparsers(dest="wallpaper_command", required=True, metavar="action")
+    walls.subcommands = wall_commands.choices
     wall_commands.add_parser("list", help="list wallpapers with their measured mood")
     add = wall_commands.add_parser("add", help="copy images into the library")
-    add.add_argument("files", nargs="+")
+    add.add_argument("files", nargs="+", metavar="FILE")
     fetch = wall_commands.add_parser("fetch", help="download SFW wallpapers from Wallhaven")
     fetch.add_argument("--count", type=int, default=DEFAULT_FETCH, metavar="N",
                        help=f"how many new images to get (default {DEFAULT_FETCH})")
-    fetch.add_argument("--query", default=wallpapers.DEFAULT_QUERY,
+    fetch.add_argument("--query", default=wallpapers.DEFAULT_QUERY, metavar="WORDS",
                        help=f"search words (default: {wallpapers.DEFAULT_QUERY!r})")
 
-    widgets = commands.add_parser("widgets", help="start or stop the desktop widgets")
+    widgets = command("widgets")
     widgets.add_argument("action", choices=("start", "stop"))
+
+    helper = command("help", description="With no command, shows examples to try and the list "
+                                         "of commands. With one, shows that command's options.")
+    helper.add_argument("topic", nargs="*", metavar="COMMAND")
     return parser
+
+
+def overview() -> str:
+    """What 'ricer help' prints: commands to try, the dials, and every command in one line."""
+    width = max(len(command) for command, _ in EXAMPLES) + 3
+    lines = [f"ricer {__version__}: a different desktop look on every run", "", "Try:"]
+    lines += [f"  {command:<{width}}{what}" for command, what in EXAMPLES]
+    lines += ["", f"Dials, each from {DIAL_MIN} to {DIAL_MAX} ({DEFAULT_DIAL} if left out):"]
+    lines += [f"  --{name:<8} {low} .. {high}" for name, (_, low, high) in DIAL_HELP.items()]
+    lines += ["  --all N    sets cool, ease and warmth together",
+              "", "Every run prints a seed, and --seed N brings that look back.", "", "Commands:"]
+    lines += [f"  {name:<12} {text}" for name, text in COMMAND_HELP.items()]
+    lines += ["", "More:  ricer help COMMAND   |   man ricer"]
+    return "\n".join(lines)
+
+
+def show_help(parser: argparse.ArgumentParser, topic: list[str], out) -> int:
+    """'ricer help' and 'ricer help COMMAND [ACTION]'. Needs no desktop."""
+    if not topic:
+        print(overview(), file=out)
+        return 0
+    found = parser
+    for word in topic:
+        found = getattr(found, "subcommands", {}).get(word)
+        if found is None:
+            print(f"ricer help: there is no command '{' '.join(topic)}'. "
+                  f"Commands: {', '.join(COMMAND_HELP)}.", file=sys.stderr)
+            return 2
+    print(found.format_help(), end="", file=out)
+    return 0
 
 
 def dials_from(args, base: Dials | None = None) -> Dials:
@@ -391,8 +460,11 @@ COMMANDS = {"instant": cmd_look, "reroll": cmd_look, "default": cmd_default, "se
 
 
 def main(argv=None, app: App | None = None, out=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     out = out or sys.stdout
+    if args.command in (None, "help"):                       # bare 'ricer' gets the examples too
+        return show_help(parser, getattr(args, "topic", []), out)
     if app is None:
         try:
             app = default_app()
