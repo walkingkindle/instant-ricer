@@ -1,5 +1,5 @@
 .\" Manual page for ricer. Kept in step with the command line by tests/test_manpage.py.
-.TH RICER 1 "2026-10-05" "ricer 0.2.0" "User Commands"
+.TH RICER 1 "2026-10-05" "ricer 0.3.0" "User Commands"
 .SH NAME
 ricer \- compose and apply a different GNOME desktop look on every run
 .SH SYNOPSIS
@@ -40,7 +40,7 @@ ricer \- compose and apply a different GNOME desktop look on every run
 .SH DESCRIPTION
 .B ricer
 composes a whole desktop look for GNOME and applies it at once, with no logout:
-wallpaper, colours, top bar, dock, terminal colours, widgets on the desktop and
+wallpaper, colours, top bar, dock, terminal, app windows, widgets on the desktop and
 widgets inside the top bar.
 .PP
 Four dials steer it. They do not select a look; they tilt the odds of what a run
@@ -219,9 +219,15 @@ the wallpaper is calm and its subject stays uncovered.
 Left as it is, plain and transparent, one floating piece, three floating cards,
 or solid. System stats and a media player can sit in the bar itself.
 .TP
+.B Windows
+App windows take the colour of the look's cards, its accent, and the outline its
+cards have. GNOME Terminal becomes one pane of tinted glass, title bar included;
+it is more see\-through where the look's cards are fainter and less over a bright
+wallpaper, so that text stays readable.
+.TP
 .B The rest
-The dock's side, hiding, size, indicator and tint; the icon and cursor set; the
-terminal's colours. While desktop widgets are shown, the Home and drive icons
+The dock's side, hiding, size, indicator and tint; the icon and cursor set.
+While desktop widgets are shown, the Home and drive icons
 on the desktop are hidden.
 .SH EXAMPLES
 A new look with every dial at 5:
@@ -317,6 +323,19 @@ The analysis of each wallpaper, and the widget process's log.
 .I \(ti/.local/share/themes/Ricer/
 The generated top\-bar theme.
 .TP
+.I \(ti/.local/share/themes/
+Besides the folder above: a copy of the stock app theme's name (two folders, such
+as Yaru\-purple\-dark and Yaru\-purple) whose files hand over to the recoloured
+stylesheet. Present only while a look is applied.
+.TP
+.I \(ti/.local/share/ricer/sheets/
+The recoloured app stylesheets, each named after its content.
+.TP
+.I \(ti/.config/gtk\-4.0/gtk.css
+Your own file. Between its two marker comments
+.B ricer
+keeps the look's colours for libadwaita apps; the rest of the file is not touched.
+.TP
 .I \(ti/.config/autostart/ricer\-widgets.desktop
 Starts the widgets at login. Present only while the look has desktop widgets.
 .SH ENVIRONMENT
@@ -350,6 +369,14 @@ bar need Vitals, a player in the bar needs Media Controls, and blur needs Blur
 my Shell.
 .B ricer setup
 installs them.
+.PP
+Window colours need the Yaru app theme. GNOME Terminal and GTK 3 apps change while
+they run. Apps built on libadwaita, such as Files and Settings, read colours when
+they start and so change when next opened. Sandboxed apps and apps that draw
+their own windows keep their look. If you have your own copy of the theme in
+.IR \(ti/.local/share/themes ,
+.B ricer
+leaves it alone and says so.
 .PP
 Placement keeps widgets off the part of a wallpaper that stands out. That is
 judged from colour, brightness and detail, and is not always what a person would

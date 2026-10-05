@@ -81,11 +81,32 @@ def accent_saturation(cool: int) -> float:
     return 0.35 + 0.60 * dial_fraction(cool)
 
 
-def relative_luminance(value: str) -> float:
+def luminance(rgb) -> float:
+    """Relative luminance (the WCAG measure) of an (r, g, b) colour."""
     def channel(c):
         return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-    r, g, b = (channel(c) for c in hex_to_rgb(value))
+    r, g, b = (channel(c) for c in rgb)
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def relative_luminance(value: str) -> float:
+    return luminance(hex_to_rgb(value))
+
+
+def with_luminance(hue: float, saturation: float, target: float) -> tuple[float, float, float]:
+    """The (r, g, b) colour of this hue and saturation whose luminance is `target`.
+
+    Swapping a colour for one of equal luminance leaves its contrast with every other colour
+    as it was, which is what lets a whole stylesheet change hue and stay readable.
+    """
+    low, high = 0.0, 1.0
+    for _ in range(20):                                      # luminance only rises with lightness
+        middle = (low + high) / 2
+        if luminance(colorsys.hls_to_rgb((hue % 360) / 360, middle, saturation)) < target:
+            low = middle
+        else:
+            high = middle
+    return colorsys.hls_to_rgb((hue % 360) / 360, (low + high) / 2, saturation)
 
 
 def contrast_ratio(a: str, b: str) -> float:
@@ -159,6 +180,17 @@ def build_palette(colors: list[tuple[str, float]], dials: Dials,
     )
 
 
+def terminal_transparency(fill: float, brightness: float | None = None) -> int:
+    """How see-through the terminal is, in percent: more where the look's cards are fainter.
+
+    A bright wallpaper lowers it, because text has to stay readable over whatever shows
+    through. Without a wallpaper to judge by, it stays at the cautious end.
+    """
+    wanted = 10 + 16 * (1 - max(0.25, min(1.0, fill))) / 0.75
+    limit = 20 if brightness is None else 30 - 22 * brightness
+    return round(max(5, min(wanted, limit)))
+
+
 def terminal_colors(palette: Palette) -> dict:
     """A 16-colour terminal scheme that sits on the card colour and shares the accent's punch."""
     base_hue = hue_of(palette.card)
@@ -167,7 +199,8 @@ def terminal_colors(palette: Palette) -> dict:
     normal = [hsl(h, saturation, 0.68) for h in hues]
     bright = [hsl(h, saturation, 0.76) for h in hues]
     return {
-        "background": hsl(base_hue, 0.25, 0.11),
+        # as coloured as the cards are, so the terminal reads as one of the look's surfaces
+        "background": hsl(base_hue, max(0.25, min(0.45, saturation_of(palette.card))), 0.11),
         "foreground": hsl(base_hue, 0.35, 0.86),
         "palette": [hsl(base_hue, 0.25, 0.09), *normal, hsl(base_hue, 0.20, 0.72),
                     hsl(base_hue, 0.20, 0.34), *bright, hsl(base_hue, 0.35, 0.90)],

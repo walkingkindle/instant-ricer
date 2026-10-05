@@ -296,9 +296,12 @@ def test_keep_wallpaper(wallpaper_set, current):
 
 
 def test_keep_style_carries_colours_and_everything_derived_from_them(wallpaper_set, current):
+    def colours(look):                                       # transparency follows the wallpaper
+        return {key: value for key, value in look.terminal.items() if key != "transparency"}
+
     for look in rerolled(wallpaper_set, current, "style"):
-        assert (look.style, look.palette, look.terminal, look.gtk_accent) == (
-            current.style, current.palette, current.terminal, current.gtk_accent)
+        assert (look.style, look.palette, colours(look), look.gtk_accent) == (
+            current.style, current.palette, colours(current), current.gtk_accent)
 
 
 def test_keep_widgets_keeps_the_set_and_designs_but_places_them_anew(wallpaper_set, current):

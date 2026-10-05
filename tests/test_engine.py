@@ -1,14 +1,17 @@
 import dataclasses
 import json
+import os
+from pathlib import Path
 
 import pytest
 
-from ricer import engine
+from ricer import engine, gtk_theme
 from ricer.backends import FakeBackend, gv, gv_uint
 from ricer.capabilities import MEDIA_CONTROLS_UUID, VITALS_UUID
-from ricer.engine import ApplyError, Engine, build_plan
+from ricer.engine import ApplyError, Engine, build_plan, sibling_theme
 from ricer.generator import generate
 from ricer.look import Bar, Dials, Dock, WidgetSpec
+from ricer.palette import hsl, terminal_transparency
 
 from conftest import PROFILE
 
@@ -216,7 +219,8 @@ def test_apply_writes_settings_files_extensions_and_state(look, full_caps, paths
     plan = build_plan(look, full_caps, paths)
     assert backend.values == plan.settings
     assert backend.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True}
-    assert result.changed == len(plan.settings) + len(plan.files) + 2
+    assert result.changed == (len(plan.settings) + len(plan.files) + len(plan.links)
+                              + len(plan.blocks) + 2)
     assert paths.shell_theme_file.read_text() == plan.files[paths.shell_theme_file]
     assert paths.autostart_file.is_file() and daemon.syncs == 1
     assert eng.current_look() == look and len(eng.history()) == 1
@@ -257,6 +261,7 @@ def test_applying_the_same_look_twice_changes_nothing(look, full_caps, paths, ba
     backend.writes.clear()
     assert eng.apply(look, full_caps).changed == 0
     assert backend.writes == [] and len(eng.history()) == 1
+    assert backend.terminal_nudges == 1 and backend.theme_reloads == []   # nobody is told twice
     assert eng.revert() > 0                                  # the first apply can still be undone
 
 
@@ -275,6 +280,8 @@ def test_revert_restores_the_exact_prior_state(look, full_caps, paths):
     assert backend.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: True}
     assert paths.widgets_file.read_text() == "old config"
     assert not paths.shell_theme_file.exists() and not paths.autostart_file.exists()
+    assert list(paths.themes_dir.iterdir()) == [] and not paths.sheets_dir.parent.exists()
+    assert not paths.gtk4_css_file.exists()
     assert eng.current_look() is None and eng.revert() == 0
 
 
@@ -309,6 +316,8 @@ def test_a_failure_part_way_rolls_everything_back(look, full_caps, paths, failin
         eng.apply(look, full_caps)
     assert backend.values == before and backend.extensions == BAR_EXTENSIONS
     assert not paths.shell_theme_file.exists() and not paths.widgets_file.exists()
+    assert list(paths.themes_dir.iterdir()) == [] and not paths.sheets_dir.parent.exists()
+    assert not paths.gtk4_css_file.exists()
     assert eng.load_state() == {} and eng.revert() == 0
 
 
@@ -388,3 +397,167 @@ def test_an_unreadable_default_counts_as_none(paths, backend):
     assert Engine(backend, paths).default_look() is None
     paths.default_file.write_text(json.dumps({"dials": {"cool": 5}, "bar_style": "cards"}))
     assert Engine(backend, paths).default_look() is None
+
+
+# -- window colours -----------------------------------------------------------------------------
+
+def recoloured(look, hue):
+    """The same look with cards of another colour: new window colours, same app theme."""
+    return dataclasses.replace(look, palette=dataclasses.replace(look.palette, card=hsl(hue, 0.4, 0.08)))
+
+
+def shadow(paths, theme):
+    """The stylesheets and links a recoloured theme occupies in the user's themes folder."""
+    folder = paths.themes_dir / theme / "gtk-3.0"
+    plain = paths.themes_dir / theme[:-len("-dark")] / "gtk-3.0"
+    return ([folder / "gtk.css", folder / "gtk-dark.css", plain / "gtk-dark.css"],
+            [folder / "gtk.gresource", plain / "gtk.gresource"])
+
+
+def theme_of(plan):
+    return plan.settings[engine.GTK_THEME].strip("'")
+
+
+def imported(stub):
+    """The generated stylesheet a theme file hands over to."""
+    return Path(stub.read_text().split('url("file://')[1].split('"')[0])
+
+
+def test_plan_recolours_the_app_theme_under_its_own_name(look, full_caps, paths, stock_themes):
+    plan = build_plan(look, full_caps, paths)
+    theme = theme_of(plan)
+    stubs, links = shadow(paths, theme)
+    (sheet, css), = plan.sheets.items()
+    stock = gtk_theme.stock_sheet(Path(stock_themes[theme]))
+    opacity = 1 - look.terminal["transparency"] / 100
+    assert css == gtk_theme.render(stock, look, opacity) and f", {round(opacity, 2)});" in css
+    assert sheet == paths.sheets_dir / gtk_theme.sheet_name(css)
+    assert all(plan.files[stub] == gtk_theme.stub(sheet) for stub in stubs)
+    # both folders borrow the pictures of the theme the stylesheet came from
+    assert plan.links == {link: stock_themes[theme] + "/gtk.gresource" for link in links}
+    assert plan.blocks == {paths.gtk4_css_file: gtk_theme.adwaita(look)}
+
+
+def test_the_terminal_is_as_see_through_as_the_look_says(look, full_caps, paths):
+    key = TERMINAL + "background-transparency-percent"
+    assert build_plan(look, full_caps, paths).settings[key] == str(look.terminal["transparency"])
+
+    colours_only = {name: value for name, value in look.terminal.items() if name != "transparency"}
+    older = dataclasses.replace(look, terminal=colours_only)             # saved before 0.3
+    assert build_plan(older, full_caps, paths).settings[key] == str(terminal_transparency(look.style.fill))
+
+    opaque = build_plan(look, dataclasses.replace(full_caps, terminal_glass=False), paths)
+    assert not any(path.startswith(TERMINAL) and "transparen" in path for path in opaque.settings)
+    assert opaque.settings[TERMINAL + "background-color"] == gv(look.terminal["background"])
+    assert "terminal-window" not in next(iter(opaque.sheets.values()))
+
+
+def test_apply_installs_window_colours_and_tells_running_apps(look, full_caps, paths, backend, stock_themes):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    plan = build_plan(look, full_caps, paths)
+    theme = theme_of(plan)
+    stubs, links = shadow(paths, theme)
+    (sheet, css), = plan.sheets.items()
+    assert sheet.read_text() == css and [imported(stub) for stub in stubs] == [sheet] * 3
+    assert all(os.readlink(link) == stock_themes[theme] + "/gtk.gresource" for link in links)
+    assert paths.gtk4_css_file.read_text() == gtk_theme.adwaita(look)
+    # the new theme name makes GTK 3 apps load it; only the terminal has to be told
+    assert backend.theme_reloads == [] and backend.terminal_nudges == 1
+
+
+def test_new_colours_under_the_same_theme_name_make_apps_reload(look, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    stubs, _ = shadow(paths, theme_of(build_plan(look, full_caps, paths)))
+    first = imported(stubs[0])
+
+    eng.apply(recoloured(look, 120), full_caps)
+    second = imported(stubs[0])
+    assert backend.theme_reloads == [sibling_theme(backend.values[engine.GTK_THEME].strip("'"))]
+    assert backend.terminal_nudges == 2
+    assert second != first and first.exists()                # revert still needs the first
+
+    eng.apply(recoloured(look, 300), full_caps)
+    assert not first.exists() and second.exists() and imported(stubs[0]).exists()
+    assert len(backend.theme_reloads) == 2
+
+
+def test_a_look_with_another_accent_moves_the_recoloured_theme(look, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(dataclasses.replace(look, gtk_accent="blue"), full_caps)
+    assert sorted(p.name for p in paths.themes_dir.iterdir()) == ["Ricer", "Yaru-blue", "Yaru-blue-dark"]
+    eng.apply(dataclasses.replace(look, gtk_accent="purple"), full_caps)
+    assert sorted(p.name for p in paths.themes_dir.iterdir()) == ["Ricer", "Yaru-purple", "Yaru-purple-dark"]
+    assert backend.theme_reloads == [] and backend.terminal_nudges == 2     # the name change does it
+
+
+def test_revert_brings_back_the_window_colours_that_were_there(look, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    stubs, links = shadow(paths, theme_of(build_plan(look, full_caps, paths)))
+    first = stubs[0].read_text()
+    eng.apply(recoloured(look, 120), full_caps)
+    assert stubs[0].read_text() != first
+
+    eng.revert()
+    assert [stub.read_text() for stub in stubs] == [first] * 3 and imported(stubs[0]).exists()
+    assert len(list(paths.sheets_dir.iterdir())) == 1        # the undone look's stylesheet is gone
+    assert backend.terminal_nudges == 3 and len(backend.theme_reloads) == 2
+
+    eng.apply(recoloured(look, 120), full_caps)
+    eng.revert(everything=True)
+    assert not any(path.exists() or path.is_symlink() for path in stubs + links)
+    assert list(paths.themes_dir.iterdir()) == [] and not paths.sheets_dir.parent.exists()
+    assert not paths.gtk4_css_file.exists()
+
+
+def test_the_users_own_gtk4_stylesheet_keeps_everything_but_ricers_block(look, full_caps, paths, backend):
+    mine = "window { border-radius: 0; }\n"
+    paths.gtk4_css_file.parent.mkdir(parents=True)
+    paths.gtk4_css_file.write_text(mine)
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    assert paths.gtk4_css_file.read_text() == gtk_theme.adwaita(look) + mine
+
+    later = "button { margin: 0; }\n"                        # written between the look and its undoing
+    paths.gtk4_css_file.write_text(paths.gtk4_css_file.read_text() + later)
+    eng.apply(recoloured(look, 120), full_caps)
+    assert paths.gtk4_css_file.read_text() == gtk_theme.adwaita(recoloured(look, 120)) + mine + later
+    eng.revert()
+    assert paths.gtk4_css_file.read_text() == gtk_theme.adwaita(look) + mine + later
+    eng.revert(everything=True)
+    assert paths.gtk4_css_file.read_text() == mine + later
+
+
+@pytest.mark.parametrize("theirs", ["gtk.css", "gtk.gresource"])
+def test_a_theme_copy_of_the_users_own_is_left_alone(look, full_caps, paths, backend, theirs):
+    theme = theme_of(build_plan(look, full_caps, paths))
+    own = paths.themes_dir / theme / "gtk-3.0" / theirs
+    own.parent.mkdir(parents=True)
+    own.write_text("headerbar { background: hotpink; }")
+    result = Engine(backend, paths).apply(look, full_caps)
+    assert any(theme in notice and "leaves alone" in notice for notice in result.notices)
+    assert own.read_text() == "headerbar { background: hotpink; }"
+    assert sorted(p.name for p in own.parent.iterdir()) == [theirs] and not paths.sheets_dir.exists()
+    assert paths.gtk4_css_file.read_text() == gtk_theme.adwaita(look)    # libadwaita apps still follow
+
+
+def test_without_a_stock_theme_to_recolour_old_window_colours_go(look, full_caps, bare_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    stubs, links = shadow(paths, theme_of(build_plan(look, full_caps, paths)))
+    result = eng.apply(look, dataclasses.replace(full_caps, gtk3_themes={}))
+    assert any("Yaru" in notice for notice in result.notices)
+    assert not any(path.exists() or path.is_symlink() for path in stubs + links)
+    assert backend.theme_reloads and backend.terminal_nudges == 2        # running apps drop them too
+    assert any("recolour" in notice for notice in build_plan(look, bare_caps, paths).notices)
+    assert build_plan(look, bare_caps, paths).blocks                     # by name, they still can
+
+
+@pytest.mark.parametrize("theme, sibling", [
+    ("Yaru-dark", "Yaru-red-dark"), ("Yaru-red-dark", "Yaru-dark"), ("Yaru-purple-dark", "Yaru-blue-dark"),
+    ("Yaru-viridian-dark", "Yaru-prussiangreen-dark"), ("Yaru-olive-dark", "Yaru-dark"),
+    ("Adwaita-dark", None), ("Yaru", None), ("Yaru-bogus-dark", None), ("", None)])
+def test_a_theme_is_reloaded_through_its_nearest_sibling(theme, sibling):
+    assert sibling_theme(theme) == sibling

@@ -52,8 +52,22 @@ class Paths:
         return self.cache / "widgets.log"
 
     @property
+    def themes_dir(self) -> Path:
+        return self.data / "themes"
+
+    @property
     def shell_theme_file(self) -> Path:
-        return self.data / "themes" / THEME_NAME / "gnome-shell" / "gnome-shell.css"
+        return self.themes_dir / THEME_NAME / "gnome-shell" / "gnome-shell.css"
+
+    @property
+    def sheets_dir(self) -> Path:
+        """Generated app stylesheets, each named after its content."""
+        return self.data / "ricer" / "sheets"
+
+    @property
+    def gtk4_css_file(self) -> Path:
+        """The user's own GTK 4 stylesheet; ricer keeps one marked block in it."""
+        return self.config.parent / "gtk-4.0" / "gtk.css"
 
     @property
     def autostart_file(self) -> Path:

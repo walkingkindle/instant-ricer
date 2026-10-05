@@ -7,9 +7,15 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 
 SHELL = "org.gnome.shell"
 INSTALL_TIMEOUT_MS = 180_000         # the user has to answer GNOME's dialog
+TERMINAL_SETTINGS = "org.gnome.Terminal.Legacy.Settings"
+TERMINAL_VARIANT = "/org/gnome/terminal/legacy/theme-variant"
+TERMINAL_BUS_NAME, TERMINAL_OBJECT = "org.gnome.Terminal", "/org/gnome/Terminal"
+TERMINAL_PATIENCE_MS = 3000          # how long a busy terminal is waited for
+NUDGE_PAUSE = 0.02                   # seconds: long enough for an idle terminal to see the first value
 
 
 def gv(value) -> str:
@@ -74,6 +80,11 @@ class GnomeBackend:
     def has_schema(self, schema: str) -> bool:
         return self._gio.SettingsSchemaSource.get_default().lookup(schema, True) is not None
 
+    def has_key(self, schema: str, key: str) -> bool:
+        """Whether a schema declares a key. Safe for schemas that have no fixed path."""
+        found = self._gio.SettingsSchemaSource.get_default().lookup(schema, True)
+        return found is not None and found.has_key(key)
+
     def effective(self, schema: str, key: str):
         """Current value including the default, or None if the schema or key does not exist."""
         found = self._gio.SettingsSchemaSource.get_default().lookup(schema, True)
@@ -87,6 +98,57 @@ class GnomeBackend:
         if current:
             self.write(name_path, "''")
             self.write(name_path, current)
+
+    def reload_gtk_theme(self, name_path: str, sibling: str) -> None:
+        """Make running GTK 3 apps re-read the app theme, which they do only when its name changes.
+
+        The name goes to a sibling theme and straight back; apps load both before they
+        next draw, so what they show is only the result.
+        """
+        current = self.read(name_path)
+        if current:
+            self.write(name_path, gv(sibling))
+            self.write(name_path, current)
+
+    def _terminal_caught_up(self) -> bool:
+        """Wait until a running GNOME Terminal has dealt with all it was sent. False if none runs."""
+        gio, none = self._gio, self._gio.DBusCallFlags.NONE
+        try:
+            bus = gio.bus_get_sync(gio.BusType.SESSION)
+            running, = bus.call_sync(
+                "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner",
+                self._glib.Variant("(s)", (TERMINAL_BUS_NAME,)), None, none, TERMINAL_PATIENCE_MS, None)
+            if running:
+                # its main loop answers this one, and only gets to it after everything before it
+                bus.call_sync(TERMINAL_BUS_NAME, TERMINAL_OBJECT, "org.gtk.Actions", "List", None, None,
+                              gio.DBusCallFlags.NO_AUTO_START, TERMINAL_PATIENCE_MS, None)
+            return bool(running)
+        except self._glib.Error:
+            return True                                      # it may be there: better told than not
+
+    def nudge_terminal(self) -> None:
+        """Make a running GNOME Terminal re-read the app theme.
+
+        The terminal settles on a theme when it starts and looks again only when its own
+        light or dark preference changes, so that is flipped and put back. Each time it
+        reads the value of that moment, so it has to notice the first before the second is
+        written: it is given time to finish whatever it is doing, and then a short pause.
+        The second arrives while it is still loading for the first, so it never draws that.
+        """
+        if not self.has_key(TERMINAL_SETTINGS, "theme-variant") or not self._terminal_caught_up():
+            return
+        kept = self.read(TERMINAL_VARIANT)
+        other = "light" if self.effective(TERMINAL_SETTINGS, "theme-variant") != "light" else "dark"
+        try:
+            self.write(TERMINAL_VARIANT, gv(other))
+            time.sleep(NUDGE_PAUSE)
+        finally:
+            if kept is None:
+                self.reset(TERMINAL_VARIANT)
+            else:
+                self.write(TERMINAL_VARIANT, kept)
+        time.sleep(NUDGE_PAUSE)                              # the last value has to reach it first
+        self._terminal_caught_up()                           # so the next thing finds it settled
 
     # -- extensions -----------------------------------------------------
     def extension_enabled(self, uuid: str) -> bool:
@@ -131,9 +193,13 @@ class GnomeBackend:
 class FakeBackend:
     """In-memory stand-in for tests."""
 
-    def __init__(self, values=None, schemas=(), effective=None, extensions=None, installable=()):
+    def __init__(self, values=None, schemas=(), effective=None, extensions=None, installable=(),
+                 keys=()):
         self.values: dict[str, str] = dict(values or {})
         self.schemas = set(schemas)
+        self.keys = set(keys)                                        # (schema, key) pairs that exist
+        self.theme_reloads: list[str] = []                           # sibling themes flipped through
+        self.terminal_nudges = 0
         self.effective_values: dict[tuple[str, str], object] = dict(effective or {})
         self.extensions: dict[str, bool] = dict(extensions or {})    # installed uuid -> enabled
         self.installable = set(installable)                          # uuids the user will accept
@@ -160,11 +226,20 @@ class FakeBackend:
     def has_schema(self, schema):
         return schema in self.schemas
 
+    def has_key(self, schema, key):
+        return (schema, key) in self.keys
+
     def effective(self, schema, key):
         return self.effective_values.get((schema, key))
 
     def reload_shell_theme(self, name_path):
         self.reloads += 1
+
+    def reload_gtk_theme(self, name_path, sibling):
+        self.theme_reloads.append(sibling)
+
+    def nudge_terminal(self):
+        self.terminal_nudges += 1
 
     def extension_enabled(self, uuid):
         return self.extensions.get(uuid, False)

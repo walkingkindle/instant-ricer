@@ -200,6 +200,8 @@ class Look:
                    *self.terminal.get("palette", [])]
         _require(len(colours) == 18 and all(isinstance(c, str) and _HEX.match(c) for c in colours),
                  "terminal needs a background, a foreground and 16 palette colours")
+        if "transparency" in self.terminal:                  # percent; looks from 0.2 have none
+            _within("terminal.transparency", self.terminal["transparency"], 0, 50)
         for widget in self.widgets:
             widget.validate()
 

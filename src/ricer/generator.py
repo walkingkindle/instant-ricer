@@ -12,7 +12,7 @@ from ricer import metrics, placement
 from ricer.chance import bump, chance, jitter, noisy_dial, pick, stream
 from ricer.look import (DIAL_MIN, WIDGET_TYPES, Bar, Dials, Dock, Look, Palette, Style, WidgetSpec,
                         dial_fraction)
-from ricer.palette import build_palette, nearest_gtk_accent, terminal_colors
+from ricer.palette import build_palette, nearest_gtk_accent, terminal_colors, terminal_transparency
 from ricer.placement import Box
 from ricer.wallpapers import Wallpaper, choose
 
@@ -330,7 +330,8 @@ def generate(dials: Dials, wallpapers: list[Wallpaper], seed: int, screen: tuple
         bar=bar,
         blur=noisy_dial(extras, dials.cool, dials.chaos) >= 4.5,
         dock=dock,
-        terminal=terminal_colors(palette),
+        terminal={**terminal_colors(palette),
+                  "transparency": terminal_transparency(style.fill, wallpaper.features.brightness)},
         layout=template,
         mirrored=mirrored,
         widgets=widgets,

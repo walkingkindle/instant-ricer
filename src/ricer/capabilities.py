@@ -24,6 +24,8 @@ OPTIONAL_EXTENSIONS = {
 DOCK_SCHEMA = "org.gnome.shell.extensions.dash-to-dock"
 DESKTOP_ICONS_SCHEMA = "org.gnome.shell.extensions.ding"
 TERMINAL_SCHEMA = "org.gnome.Terminal.ProfilesList"
+TERMINAL_PROFILE_SCHEMA = "org.gnome.Terminal.Legacy.Profile"
+STOCK_GTK_THEME = "Yaru-dark"        # ricer sets this app theme or one of its accent variants
 INTERFACE = "org.gnome.desktop.interface"
 DEFAULT_SCREEN = (1920, 1080)
 # typeface voices: families to use if installed, best first
@@ -56,6 +58,12 @@ class Capabilities:
     screen: tuple[int, int] = DEFAULT_SCREEN
     installed: frozenset[str] = frozenset()   # uuids of installed extensions
     extensions_allowed: bool = True           # False when GNOME has user extensions switched off
+    gtk3_themes: dict[str, str] = field(default_factory=dict)    # stock app theme -> its gtk-3.0 folder
+    terminal_glass: bool = False              # this GNOME Terminal can have a see-through background
+
+    @property
+    def window_colours(self) -> bool:
+        return STOCK_GTK_THEME in self.gtk3_themes
 
     @property
     def widgets(self) -> bool:
@@ -81,6 +89,8 @@ class Capabilities:
             ("Dock styling", self.dock, "" if self.dock else "Dash to Dock / Ubuntu Dock not found"),
             ("Terminal colours", self.terminal_profile is not None,
              "" if self.terminal_profile else "GNOME Terminal not found"),
+            ("Window colours", self.window_colours,
+             "" if self.window_colours else "need the Yaru app theme (Ubuntu)"),
         ]
 
 
@@ -151,6 +161,12 @@ def detect(backend, paths: Paths, env=None, system_data_dirs=SYSTEM_DATA_DIRS,
         for css in sorted((directory / "gnome-shell/theme").glob("*/gnome-shell.css")):
             shell_themes.setdefault(css.parent.name, str(css))
 
+    # only the system's copies: a theme in the user's folder may be one ricer wrote itself
+    gtk3_themes = {}
+    for directory in data_dirs:
+        for css in sorted((directory / "themes").glob("*/gtk-3.0/gtk.css")):
+            gtk3_themes.setdefault(css.parent.parent.name, str(css.parent))
+
     font = _family(backend.effective(INTERFACE, "font-name"), "Sans 11")
     mono = _family(backend.effective(INTERFACE, "monospace-font-name"), "Monospace 11")
     profile = (backend.effective(TERMINAL_SCHEMA, "default")
@@ -178,4 +194,6 @@ def detect(backend, paths: Paths, env=None, system_data_dirs=SYSTEM_DATA_DIRS,
         screen=primary_screen() if screen is None else screen,
         installed=installed,
         extensions_allowed=allowed,
+        gtk3_themes=gtk3_themes,
+        terminal_glass=backend.has_key(TERMINAL_PROFILE_SCHEMA, "background-transparency-percent"),
     )

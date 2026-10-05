@@ -72,13 +72,41 @@ FONTS = {"ui": "Ubuntu Sans", "condensed": "Ubuntu Sans Condensed", "mono": "Ubu
 PROFILE = "b1dcc9dd-5262-4d8d-a863-c897e6d979b9"
 
 
+# a stock app theme in miniature: greys, an accent with a shade of it, a warning, a picture
+STOCK_CSS = """\
+/* stock theme: #2c2c2c is the window colour */
+@define-color theme_bg_color #2c2c2c;
+@define-color theme_selected_bg_color #7764D8;
+.background { color: #F7F7F7; background-color: #2c2c2c; }
+window#abc headerbar { background: #131313 linear-gradient(to top, #222222, #222222);
+  box-shadow: inset 0 1px rgba(247, 247, 247, 0.07); }
+button:checked { background-color: #7764D8; border-color: #533bce;
+  background-image: url("assets/check.png"); }
+.warning { color: #f99b11; }
+decoration { box-shadow: 0 3px 9px 1px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.75); }
+"""
+STOCK_THEMES = ("Yaru-dark", "Yaru-blue-dark", "Yaru-purple-dark", "Yaru-magenta-dark", "Yaru-red-dark")
+
+
 @pytest.fixture
-def full_caps():
+def stock_themes(tmp_path):
+    """Stock app themes as a distribution installs them: name -> its gtk-3.0 folder."""
+    folders = {}
+    for name in STOCK_THEMES:
+        folder = tmp_path / "usr-share/themes" / name / "gtk-3.0"
+        folder.mkdir(parents=True)
+        (folder / "gtk.css").write_text(STOCK_CSS)
+        (folder / "gtk.gresource").write_bytes(b"the theme's pictures")
+        folders[name] = str(folder)
+    return folders
+
+
+@pytest.fixture
+def full_caps(stock_themes):
     """A desktop where every feature is available (Ubuntu-like, X11)."""
     return Capabilities(
         gnome=True, session="x11",
-        gtk_themes=frozenset({"Yaru", "Yaru-dark", "Yaru-blue-dark", "Yaru-purple-dark",
-                              "Yaru-magenta-dark", "Yaru-red-dark"}),
+        gtk_themes=frozenset({"Yaru", *STOCK_THEMES}),
         icon_themes=frozenset({"Yaru", "Yaru-dark", "Yaru-blue-dark", "Adwaita", "Papirus-Dark",
                                "Bibata-Modern-Ice"}),
         shell_themes={"Yaru-dark": "/usr/share/gnome-shell/theme/Yaru-dark/gnome-shell.css",
@@ -87,6 +115,7 @@ def full_caps():
         font="Ubuntu Sans", clock_24h=True, vitals=True, media_controls=True, desktop_icons=True,
         fonts=dict(FONTS), screen=(1920, 1080),
         installed=frozenset({USER_THEME_UUID, BLUR_UUID, VITALS_UUID, MEDIA_CONTROLS_UUID}),
+        gtk3_themes=stock_themes, terminal_glass=True,
     )
 
 

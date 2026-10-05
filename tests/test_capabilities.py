@@ -1,6 +1,7 @@
 from ricer.backends import FakeBackend
 from ricer.capabilities import (BLUR_UUID, DESKTOP_ICONS_SCHEMA, DOCK_SCHEMA, MEDIA_CONTROLS_UUID,
-                                TERMINAL_SCHEMA, USER_THEME_UUID, VITALS_UUID, detect, font_voices)
+                                TERMINAL_PROFILE_SCHEMA, TERMINAL_SCHEMA, USER_THEME_UUID, VITALS_UUID,
+                                detect, font_voices)
 from ricer.look import VOICES
 
 SHELL = "org.gnome.shell"
@@ -10,17 +11,22 @@ NO_FONTS = frozenset()
 
 def test_detects_an_ubuntu_like_desktop(paths, tmp_path):
     system = tmp_path / "usr-share"
-    (system / "themes/Yaru-blue-dark").mkdir(parents=True)
+    for theme in ("Yaru-dark", "Yaru-blue-dark"):
+        (system / "themes" / theme / "gtk-3.0").mkdir(parents=True)
+        (system / "themes" / theme / "gtk-3.0/gtk.css").write_text("")
+    (system / "themes/NoGtk3/gtk-4.0").mkdir(parents=True)
     (system / "icons/Papirus-Dark").mkdir(parents=True)
     (system / "gnome-shell/theme/Yaru-dark").mkdir(parents=True)
     (system / "gnome-shell/theme/Yaru-dark/gnome-shell.css").write_text("")
     (system / "gnome-shell/extensions/ubuntu-dock@ubuntu.com").mkdir(parents=True)
     (paths.data / "icons/Bibata-Modern-Ice").mkdir(parents=True)
-    (paths.home / ".themes/Mine").mkdir(parents=True)
+    (paths.home / ".themes/Mine/gtk-3.0").mkdir(parents=True)
+    (paths.home / ".themes/Mine/gtk-3.0/gtk.css").write_text("")
     for uuid in (USER_THEME_UUID, BLUR_UUID, VITALS_UUID):
         (paths.data / "gnome-shell/extensions" / uuid).mkdir(parents=True)
     backend = FakeBackend(
         schemas={DOCK_SCHEMA, TERMINAL_SCHEMA, DESKTOP_ICONS_SCHEMA},
+        keys={(TERMINAL_PROFILE_SCHEMA, "background-transparency-percent")},
         effective={(SHELL, "enabled-extensions"): [USER_THEME_UUID, BLUR_UUID],
                    (SHELL, "disable-user-extensions"): False,
                    (IFACE, "font-name"): "Ubuntu Sans 11",
@@ -33,7 +39,11 @@ def test_detects_an_ubuntu_like_desktop(paths, tmp_path):
     assert caps.gnome and caps.session == "x11" and caps.widgets
     assert caps.dock and caps.user_theme and caps.blur and caps.desktop_icons
     assert caps.vitals and not caps.media_controls           # installed is enough; ricer switches it
-    assert caps.gtk_themes == {"Yaru-blue-dark", "Mine"}
+    assert caps.gtk_themes == {"Yaru-dark", "Yaru-blue-dark", "NoGtk3", "Mine"}
+    # only the system's own themes can be recoloured: one in the user's folder may be ricer's
+    assert caps.gtk3_themes == {name: str(system / "themes" / name / "gtk-3.0")
+                                for name in ("Yaru-dark", "Yaru-blue-dark")}
+    assert caps.window_colours and caps.terminal_glass
     assert caps.icon_themes == {"Papirus-Dark", "Bibata-Modern-Ice"}
     assert caps.shell_themes == {"Yaru-dark": str(system / "gnome-shell/theme/Yaru-dark/gnome-shell.css")}
     assert caps.terminal_profile == "abc-123" and caps.screen == (2560, 1440)
@@ -53,9 +63,10 @@ def test_detects_a_bare_desktop_without_crashing(paths, tmp_path):
     assert not (caps.dock or caps.user_theme or caps.blur or caps.vitals or caps.media_controls)
     assert not caps.desktop_icons and caps.terminal_profile is None
     assert caps.gtk_themes == frozenset() and caps.font == "Sans"
+    assert caps.gtk3_themes == {} and not caps.window_colours and not caps.terminal_glass
     notes = {feature: note for feature, available, note in caps.report() if not available}
     assert "wayland" in notes["Desktop widgets"] and "ricer setup" in notes["Top bar styling"]
-    assert "Vitals" in notes["Stats in the top bar"]
+    assert "Vitals" in notes["Stats in the top bar"] and "Yaru" in notes["Window colours"]
 
 
 def test_the_global_extensions_switch_blocks_everything(paths, tmp_path):

@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ricer import placement, shell_theme
+from ricer import gtk_theme, placement, shell_theme
 from ricer.backends import gv, gv_uint
 from ricer.capabilities import MEDIA_CONTROLS_UUID, VITALS_UUID, Capabilities
 from ricer.compose import remember
 from ricer.look import Look, LookError
-from ricer.palette import GNOME_ACCENT_NAMES
+from ricer.palette import GNOME_ACCENT_NAMES, YARU_ACCENT_HUES, hue_distance, terminal_transparency
 from ricer.paths import THEME_NAME, Paths
 
 BACKGROUND = "/org/gnome/desktop/background/"
@@ -24,6 +26,7 @@ VITALS = "/org/gnome/shell/extensions/vitals/"
 MEDIA = "/org/gnome/shell/extensions/mediacontrols/"
 DESKTOP_ICONS = "/org/gnome/shell/extensions/ding/"
 TERMINAL_PROFILES = "/org/gnome/terminal/legacy/profiles:/"
+GTK_THEME = INTERFACE + "gtk-theme"
 
 FANCY_ICONS = ("Papirus-Dark",)      # used by "fancy" looks when installed
 FANCY_CURSORS = ("Bibata-Modern-Ice",)
@@ -46,9 +49,17 @@ class ApplyError(RuntimeError):
 class Plan:
     settings: dict[str, str] = field(default_factory=dict)       # dconf path -> GVariant text
     files: dict[Path, str | None] = field(default_factory=dict)  # None means "must not exist"
+    links: dict[Path, str | None] = field(default_factory=dict)  # symlink -> what it points at
+    blocks: dict[Path, str | None] = field(default_factory=dict) # ricer's block in a file the user owns
+    sheets: dict[Path, str] = field(default_factory=dict)        # stylesheets named after their content
     extensions: dict[str, bool] = field(default_factory=dict)    # uuid -> switched on
     restore: list[str] = field(default_factory=list)             # settings to hand back as they were
     notices: list[str] = field(default_factory=list)
+
+
+# What a snapshot records, in the order it is written and put back: files before the settings
+# that point at them, extensions last so that each one starts up already configured.
+KINDS = ("files", "links", "blocks", "settings", "extensions")
 
 
 @dataclass
@@ -87,8 +98,11 @@ def autostart_entry() -> str:
     )
 
 
-def _theme_and_icons(look: Look, caps: Capabilities, settings: dict) -> str:
-    """Wallpaper, colour scheme, app theme, icons and cursor. Returns the Yaru variant suffix."""
+def _theme_and_icons(look: Look, caps: Capabilities, settings: dict) -> tuple[str, str | None]:
+    """Wallpaper, colour scheme, app theme, icons and cursor.
+
+    Returns the Yaru variant suffix and the app theme that was chosen, if any.
+    """
     yaru = "" if look.gtk_accent == "default" else f"-{look.gtk_accent}"
     uri = Path(look.wallpaper).as_uri()
     settings[BACKGROUND + "picture-uri"] = gv(uri)
@@ -97,9 +111,9 @@ def _theme_and_icons(look: Look, caps: Capabilities, settings: dict) -> str:
     settings[SCREENSAVER + "picture-uri"] = gv(uri)
     settings[INTERFACE + "color-scheme"] = gv("prefer-dark")
 
-    gtk_theme = _first_installed((f"Yaru{yaru}-dark", "Yaru-dark"), caps.gtk_themes)
-    if gtk_theme:
-        settings[INTERFACE + "gtk-theme"] = gv(gtk_theme)
+    app_theme = _first_installed((f"Yaru{yaru}-dark", "Yaru-dark"), caps.gtk_themes)
+    if app_theme:
+        settings[GTK_THEME] = gv(app_theme)
     if caps.accent_color:
         settings[INTERFACE + "accent-color"] = gv(GNOME_ACCENT_NAMES[look.gtk_accent])
 
@@ -112,7 +126,7 @@ def _theme_and_icons(look: Look, caps: Capabilities, settings: dict) -> str:
                               caps.icon_themes)
     if cursor:
         settings[INTERFACE + "cursor-theme"] = gv(cursor)
-    return yaru
+    return yaru, app_theme
 
 
 def _dock(look: Look, caps: Capabilities, plan: Plan) -> None:
@@ -176,19 +190,104 @@ def _bar(look: Look, caps: Capabilities, plan: Plan, paths: Paths, yaru: str) ->
         notices.append("No player in the top bar: it needs the 'Media Controls' extension (ricer setup).")
 
 
+def _transparency(look: Look) -> int:
+    """Percent of the terminal's background that lets the desktop through."""
+    return look.terminal.get("transparency", terminal_transparency(look.style.fill))
+
+
 def _terminal(look: Look, caps: Capabilities, settings: dict) -> None:
     if not caps.terminal_profile:
         return
     profile = f"{TERMINAL_PROFILES}:{caps.terminal_profile}/"
     settings[profile + "use-theme-colors"] = gv(False)
-    settings[profile + "use-theme-transparency"] = gv(False)
-    settings[profile + "use-transparent-background"] = gv(True)
-    settings[profile + "background-transparency-percent"] = gv(
-        round(40 * (1 - max(0.5, look.style.fill))))
+    if caps.terminal_glass:
+        settings[profile + "use-theme-transparency"] = gv(False)
+        settings[profile + "use-transparent-background"] = gv(True)
+        settings[profile + "background-transparency-percent"] = gv(_transparency(look))
     settings[profile + "background-color"] = gv(look.terminal["background"])
     settings[profile + "foreground-color"] = gv(look.terminal["foreground"])
     settings[profile + "bold-color-same-as-fg"] = gv(True)
     settings[profile + "palette"] = gv(look.terminal["palette"])
+
+
+def sibling_theme(theme: str) -> str | None:
+    """The Yaru variant nearest in hue to this one, or None for a theme that is not Yaru's.
+
+    Flipping the theme name through it makes apps re-read a theme whose name has not changed.
+    """
+    match = re.fullmatch(r"Yaru(?:-([a-z]+))?-dark", theme)
+    accent = (match.group(1) or "default") if match else None
+    if accent not in YARU_ACCENT_HUES:
+        return None
+    nearest = min((name for name in YARU_ACCENT_HUES if name != accent),
+                  key=lambda name: (hue_distance(YARU_ACCENT_HUES[name], YARU_ACCENT_HUES[accent]), name))
+    return "Yaru-dark" if nearest == "default" else f"Yaru-{nearest}-dark"
+
+
+def _shadow(paths: Paths, theme: str) -> tuple[list[Path], list[Path]]:
+    """Where a recoloured theme goes: its stylesheets, and the links to the stock pictures.
+
+    GTK 3 apps load the theme by its name. Apps built on libhandy, GNOME Terminal among
+    them, drop a "-dark" from the name and ask for the dark variant of what is left.
+    """
+    folder = paths.themes_dir / theme / "gtk-3.0"
+    sheets, links = [folder / "gtk.css", folder / "gtk-dark.css"], [folder / "gtk.gresource"]
+    if theme.endswith("-dark"):
+        plain = paths.themes_dir / theme[:-len("-dark")] / "gtk-3.0"
+        sheets.append(plain / "gtk-dark.css")
+        links.append(plain / "gtk.gresource")
+    return sheets, links
+
+
+def _ours(path: Path) -> bool:
+    try:
+        with path.open() as file:
+            return gtk_theme.is_ours(file.read(len(gtk_theme.MARK)))
+    except (OSError, UnicodeError):
+        return False
+
+
+def _left_behind(paths: Paths) -> tuple[list[Path], list[Path]]:
+    """Theme files an earlier look put in the user's themes folder."""
+    sheets, links = [], []
+    for folder in sorted(paths.themes_dir.glob("*/gtk-3.0")):
+        mine = [css for css in sorted(folder.glob("*.css")) if _ours(css)]
+        sheets += mine
+        if mine and (folder / "gtk.gresource").is_symlink():
+            links.append(folder / "gtk.gresource")
+    return sheets, links
+
+
+def _windows(look: Look, caps: Capabilities, plan: Plan, paths: Paths, theme: str | None) -> None:
+    """Window colours: the app theme recoloured under its own name, and the same colours by
+    name for libadwaita apps, which take no theme."""
+    plan.blocks[paths.gtk4_css_file] = gtk_theme.adwaita(look)
+
+    old_sheets, old_links = _left_behind(paths)
+    plan.files.update({path: None for path in old_sheets})   # whatever this look does not rewrite
+    plan.links.update({path: None for path in old_links})
+
+    folder = Path(caps.gtk3_themes[theme]) if theme in caps.gtk3_themes else None
+    stock = gtk_theme.stock_sheet(folder) if folder else None
+    if stock is None:
+        plan.notices.append("GTK 3 apps and the terminal's frame keep the stock colours: "
+                            "no app theme here that ricer can recolour (it needs Yaru).")
+        return
+    sheets, links = _shadow(paths, theme)
+    if any(path.exists() and not _ours(path) for path in sheets) or any(
+            path.exists() and not path.is_symlink() for path in links):
+        plan.notices.append(f"GTK 3 apps and the terminal's frame keep the stock colours: you have "
+                            f"your own copy of {theme} in {paths.themes_dir}, which ricer leaves alone.")
+        return
+
+    # a see-through terminal gets a frame to match
+    glass = 1 - _transparency(look) / 100 if caps.terminal_profile and caps.terminal_glass else None
+    css = gtk_theme.render(stock, look, glass)
+    sheet = paths.sheets_dir / gtk_theme.sheet_name(css)
+    plan.sheets[sheet] = css
+    bundle = folder / "gtk.gresource"
+    plan.files.update({path: gtk_theme.stub(sheet) for path in sheets})
+    plan.links.update({path: str(bundle) if bundle.exists() else None for path in links})
 
 
 def build_plan(look: Look, caps: Capabilities, paths: Paths) -> Plan:
@@ -196,7 +295,7 @@ def build_plan(look: Look, caps: Capabilities, paths: Paths) -> Plan:
     plan = Plan()
     settings, notices = plan.settings, plan.notices
 
-    yaru = _theme_and_icons(look, caps, settings)
+    yaru, app_theme = _theme_and_icons(look, caps, settings)
     _dock(look, caps, plan)
     _bar(look, caps, plan, paths, yaru)
 
@@ -212,6 +311,7 @@ def build_plan(look: Look, caps: Capabilities, paths: Paths) -> Plan:
         notices.append("No blur: it needs the 'Blur my Shell' extension (ricer setup).")
 
     _terminal(look, caps, settings)
+    _windows(look, caps, plan, paths, app_theme)
 
     config = widgets_config(look, caps)
     plan.files[paths.widgets_file] = json.dumps(config, indent=2) + "\n"
@@ -242,6 +342,26 @@ def _put(path: Path, content: str | None) -> None:
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+
+
+def _target(path: Path) -> str | None:
+    """What a symlink points at; None if there is no symlink there."""
+    return os.readlink(path) if path.is_symlink() else None
+
+
+def _point(path: Path, target: str | None) -> None:
+    if path.is_symlink():
+        path.unlink()
+    if target is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
+
+
+def _put_block(path: Path, block: str | None) -> None:
+    """Set or remove ricer's block in a file that is the user's, leaving the rest as it is."""
+    text = _read(path)
+    new = gtk_theme.with_block(text, block) if block else gtk_theme.without_block(text or "")
+    _put(path, new if new.strip() else None)                 # nothing else in it: no file
 
 
 class Engine:
@@ -301,13 +421,69 @@ class Engine:
         else:
             self.backend.write(path, value)
 
-    def _restore(self, settings: dict, files: dict, extensions: dict) -> None:
-        for path, content in files.items():
-            _put(Path(path), content)
-        for path, value in settings.items():
-            self._set(path, value)
-        for uuid, enabled in extensions.items():
-            self.backend.set_extension_enabled(uuid, enabled)
+    def _write(self, kind: str, key, value) -> None:
+        """Put one setting, file, link, block or extension into the given state."""
+        if kind == "settings":
+            self._set(key, value)
+        elif kind == "extensions":
+            self.backend.set_extension_enabled(key, value)
+        else:
+            path = Path(key)
+            {"files": _put, "links": _point, "blocks": _put_block}[kind](path, value)
+            if value is None:
+                self._tidy(path)
+
+    def _tidy(self, path: Path) -> None:
+        """Remove the theme folders that a deleted file leaves empty."""
+        folder = path.parent
+        while self.paths.themes_dir in folder.parents:
+            try:
+                folder.rmdir()
+            except OSError:                                  # not empty, or already gone
+                return
+            folder = folder.parent
+
+    def _restore(self, done: dict) -> None:
+        for kind in KINDS:
+            for key, value in done.get(kind, {}).items():
+                self._write(kind, key, value)
+
+    def _refresh_windows(self, done: dict) -> None:
+        """Get running apps to show window colours that changed underneath them.
+
+        GTK 3 apps re-read a theme only when its name changes, and GNOME Terminal not even
+        then, so both are told. libadwaita apps cannot be: they read colours when they start.
+        """
+        themes = str(self.paths.themes_dir)
+        touched = bool(done.get("links")) or any(
+            path.startswith(themes) and "/gtk-3.0/" in path for path in done.get("files", {}))
+        renamed = GTK_THEME in done.get("settings", {})
+        if touched and not renamed:
+            sibling = sibling_theme((self.backend.read(GTK_THEME) or "").strip("'"))
+            if sibling:
+                self.backend.reload_gtk_theme(GTK_THEME, sibling)
+        if touched or renamed:
+            self.backend.nudge_terminal()
+
+    def _sweep(self, state: dict) -> None:
+        """Delete generated stylesheets that nothing points at any more.
+
+        One is still wanted while a theme file imports it or the state holds a theme file
+        that does, which is what lets `revert` bring the previous look's colours back.
+        """
+        sheets = list(self.paths.sheets_dir.glob("*.css"))
+        if not sheets:
+            return
+        wanted = json.dumps(state) + "".join(
+            _read(css) or "" for css in self.paths.themes_dir.glob("*/gtk-3.0/*.css") if _ours(css))
+        for sheet in sheets:
+            if sheet.name not in wanted:
+                sheet.unlink(missing_ok=True)
+        for folder in (self.paths.sheets_dir, self.paths.sheets_dir.parent):
+            try:
+                folder.rmdir()                               # only when nothing is left in it
+            except OSError:
+                break
 
     def _restart_stale(self, changed_settings, switched_extensions) -> None:
         """Restart extensions whose start-up-only settings changed while they stayed on."""
@@ -322,72 +498,83 @@ class Engine:
         state = self.load_state()
         original = state.get("original") or {}
 
-        targets: dict[str, str | None] = dict(plan.settings)
+        settings: dict[str, str | None] = dict(plan.settings)
         for path in plan.restore:
             # only what ricer itself changed earlier is handed back; the rest was never touched
             if path in original.get("settings", {}):
-                targets[path] = original["settings"][path]
+                settings[path] = original["settings"][path]
 
-        before_settings = {path: self.backend.read(path) for path in targets}
-        before_files = {str(path): _read(path) for path in plan.files}
-        before_extensions = {uuid: self.backend.extension_enabled(uuid) for uuid in plan.extensions}
-        changed_settings = {path: value for path, value in targets.items()
-                            if not self.backend.same(before_settings[path], value)}
-        changed_files = {path: content for path, content in plan.files.items()
-                         if before_files[str(path)] != content}
-        changed_extensions = {uuid: enabled for uuid, enabled in plan.extensions.items()
-                              if before_extensions[uuid] != enabled}
+        wanted = {
+            "files": {str(path): content for path, content in plan.files.items()},
+            "links": {str(path): target for path, target in plan.links.items()},
+            "blocks": {str(path): block for path, block in plan.blocks.items()},
+            "settings": settings,
+            "extensions": dict(plan.extensions),
+        }
+        before = {
+            "files": {path: _read(Path(path)) for path in wanted["files"]},
+            "links": {path: _target(Path(path)) for path in wanted["links"]},
+            "blocks": {path: gtk_theme.block_in(_read(Path(path))) for path in wanted["blocks"]},
+            "settings": {path: self.backend.read(path) for path in settings},
+            "extensions": {uuid: self.backend.extension_enabled(uuid) for uuid in plan.extensions},
+        }
 
-        done_settings, done_files, done_extensions = {}, {}, {}
+        def same(kind: str, a, b) -> bool:
+            return self.backend.same(a, b) if kind == "settings" else a == b
+
+        changed = {kind: {key: value for key, value in wanted[kind].items()
+                          if not same(kind, before[kind][key], value)} for kind in KINDS}
+
+        done: dict[str, dict] = {kind: {} for kind in KINDS}
         try:
-            # files first: the stylesheet has to exist before the theme setting points at it
-            for path, content in changed_files.items():
-                _put(path, content)
-                done_files[str(path)] = before_files[str(path)]
-            for path, value in changed_settings.items():
-                self._set(path, value)
-                done_settings[path] = before_settings[path]
-            # extensions last, so each one starts up already configured
-            for uuid, enabled in changed_extensions.items():
-                self.backend.set_extension_enabled(uuid, enabled)
-                done_extensions[uuid] = before_extensions[uuid]
+            for path, content in plan.sheets.items():        # named after their content: never rewritten
+                if not path.exists():
+                    _put(path, content)
+            for kind in KINDS:
+                for key, value in changed[kind].items():
+                    self._write(kind, key, value)
+                    done[kind][key] = before[kind][key]
         except Exception as error:
-            self._restore(done_settings, done_files, done_extensions)
+            self._restore(done)
+            self._sweep(state)
             raise ApplyError(f"could not apply the look, nothing was changed: {error}") from error
 
-        if self.paths.shell_theme_file in changed_files and USER_THEME_NAME not in changed_settings:
+        if (str(self.paths.shell_theme_file) in changed["files"]
+                and USER_THEME_NAME not in changed["settings"]):
             self.backend.reload_shell_theme(USER_THEME_NAME)
-        self._restart_stale(changed_settings, changed_extensions)
+        self._restart_stale(changed["settings"], changed["extensions"])
+        self._refresh_windows(changed)
 
-        done = {"settings": done_settings, "files": done_files, "extensions": done_extensions}
-        changed = sum(len(part) for part in done.values())
-        if changed:
+        count = sum(len(part) for part in done.values())
+        if count:
             state["snapshot"] = {**done, "look": state.get("look")}
             first = state.setdefault("original", {})
             for kind, part in done.items():
                 for key, value in part.items():
                     first.setdefault(kind, {}).setdefault(key, value)
         saved = json.loads(json.dumps(look.to_dict()))          # as it will read back from the file
-        if changed or state.get("look") != saved:
+        if count or state.get("look") != saved:
             state["history"] = remember(state.get("history", []), look)
         state["look"] = saved
         self._save_state(state)
+        self._sweep(state)
         if self.daemon:
             self.daemon.sync()
-        return Result(changed=changed, notices=plan.notices)
+        return Result(changed=count, notices=plan.notices)
 
     def revert(self, everything: bool = False) -> int:
         """Undo the last apply, or with `everything` all of ricer's changes. Returns how many."""
         state = self.load_state()
         snapshot = state.get("original" if everything else "snapshot") or {}
-        settings, files = snapshot.get("settings", {}), snapshot.get("files", {})
-        extensions = snapshot.get("extensions", {})
-        if not (settings or files or extensions):
+        done = {kind: snapshot.get(kind, {}) for kind in KINDS}
+        count = sum(len(part) for part in done.values())
+        if not count:
             return 0
-        self._restore(settings, files, extensions)
-        if str(self.paths.shell_theme_file) in files:
+        self._restore(done)
+        if str(self.paths.shell_theme_file) in done["files"]:
             self.backend.reload_shell_theme(USER_THEME_NAME)
-        self._restart_stale(settings, extensions)
+        self._restart_stale(done["settings"], done["extensions"])
+        self._refresh_windows(done)
         state.pop("snapshot", None)
         # undoing one apply puts the look before it back in charge
         state["look"] = None if everything else snapshot.get("look")
@@ -395,6 +582,7 @@ class Engine:
             state.pop("original", None)
             state.pop("history", None)
         self._save_state(state)
+        self._sweep(state)
         if self.daemon:
             self.daemon.sync()
-        return len(settings) + len(files) + len(extensions)
+        return count

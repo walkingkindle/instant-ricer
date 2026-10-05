@@ -1,7 +1,7 @@
 # instant-ricer
 
 A desktop ricing engine for GNOME. Turn four dials and it composes a whole look: wallpaper,
-colours, top bar, dock, terminal, and widgets on the desktop and in the bar. It applies
+colours, top bar, dock, terminal, app windows, and widgets on the desktop and in the bar. It applies
 live, with no logout, and one command puts everything back.
 
 ```
@@ -69,8 +69,14 @@ come from the wallpaper.
 System stats and a media player can sit in the bar itself, so they stay visible over
 full-screen windows.
 
+**Windows** take the colour of the look's cards and its accent, and the outline its cards
+have. GNOME Terminal becomes one pane of tinted glass, title bar included: more see-through
+where the look's cards are fainter, less over a bright wallpaper so text stays readable.
+The terminal and GTK 3 apps change at once; libadwaita apps (Files, Settings) take the
+colours when they are next opened.
+
 **The rest**: dock side, auto-hide, size, indicator style and tint; icon and cursor set;
-terminal colours; Home and drive icons are hidden while desktop widgets are shown.
+Home and drive icons are hidden while desktop widgets are shown.
 
 ## How a look is composed
 
@@ -106,7 +112,8 @@ what it skipped. `ricer status` lists it.
 | Player in the top bar | [Media Controls](https://extensions.gnome.org/extension/4470/media-controls/) |
 | Blur | [Blur my Shell](https://extensions.gnome.org/extension/3193/blur-my-shell/) |
 | Dock styling | Ubuntu Dock or [Dash to Dock](https://extensions.gnome.org/extension/307/dash-to-dock/) |
-| Terminal colours | GNOME Terminal |
+| Terminal colours | GNOME Terminal (see-through where its build supports that, as on Ubuntu) |
+| Window colours in GTK 3 apps and the terminal's frame | the Yaru app theme (Ubuntu) |
 | Accent-matched app theme | Yaru variants (Ubuntu); on GNOME 47+ the system accent colour is set instead |
 | Other icons and cursor | Papirus-Dark and Bibata-Modern-Ice, used only if installed |
 
@@ -187,7 +194,10 @@ Ricer only writes settings it owns, and records the previous value of each first
 - Vitals and Media Controls: their settings, and whether each is switched on
 - Blur my Shell's blur switches
 - the desktop-icon extension's Home and drive icons
-- the default GNOME Terminal profile's colours
+- the default GNOME Terminal profile's colours and transparency
+- window colours: a recoloured copy of the stock app theme under its own name in
+  `~/.local/share/themes`, the stylesheet it points at in `~/.local/share/ricer`, and one
+  marked block in `~/.config/gtk-4.0/gtk.css` (the rest of that file is left as it is)
 - its own files in `~/.config/ricer/` and `~/.cache/ricer/`, and an autostart entry for
   the widgets
 
@@ -203,6 +213,11 @@ If applying fails part-way, what was already written is put back.
   detail). It keeps widgets off the obvious centre of interest, not off every face.
 - The top-bar theme is layered over the stock Yaru shell theme. On distributions without
   Yaru it imports GNOME's built-in dark theme instead; that path is not yet tested.
+- **Window colours reach apps in three ways.** GTK 3 apps and GNOME Terminal change live.
+  libadwaita apps read colours only when they start. Sandboxed apps (Snap, Flatpak) and apps
+  that draw themselves (browsers, Electron) keep their own look. Pictures inside the stock
+  theme, such as checkboxes, keep the nearest stock accent. If you keep your own copy of
+  the theme in `~/.local/share/themes`, ricer leaves it alone and says so.
 - English only: the word clock and the greeting are not translated.
 
 ## Development
@@ -227,6 +242,7 @@ one (a GUI, a model acting as art director) can drive the desktop the same way.
 | `placement.py`, `metrics.py` | zones, costs, stacking; widget sizes |
 | `engine.py`, `backends.py`, `capabilities.py` | apply, snapshot, revert; the desktop behind an interface with an in-memory fake |
 | `shell_theme.py`, `data/` | the top-bar stylesheet |
+| `gtk_theme.py` | window colours: the stock app theme recoloured, each colour keeping its luminance |
 | `widgets/` | the daemon and every widget design |
 
 Everything that decides is pure and tested without a desktop. Widgets are tested by drawing
