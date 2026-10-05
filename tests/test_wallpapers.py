@@ -1,5 +1,7 @@
 import io
 import json
+import urllib.parse
+import os
 import random
 
 import pytest
@@ -193,7 +195,8 @@ class FakeWallhaven:
         assert request.get_header("User-agent", "").startswith("ricer/")
         if url.startswith(wallpapers.WALLHAVEN_SEARCH):
             page = int(url.split("page=")[1].split("&")[0])
-            body = json.dumps({"data": self.pages.get(page, [])}).encode()
+            body = json.dumps({"data": self.pages.get(page, []),
+                               "meta": {"last_page": max(self.pages, default=0)}}).encode()
         else:
             body = b"image-bytes:" + url.encode()
         return io.BytesIO(body)
@@ -205,16 +208,18 @@ def item(ident, ext="jpg"):
 
 def test_fetch_saves_new_wallpapers_and_asks_only_for_sfw(tmp_path):
     web = FakeWallhaven({1: [item("aaa111"), item("bbb222", "png")]})
-    saved = wallpapers.fetch(tmp_path, 5, opener=web)
+    saved = wallpapers.fetch(tmp_path, 5, "anime scenery", opener=web)
     assert [p.name for p in saved] == ["wallhaven-aaa111.jpg", "wallhaven-bbb222.png"]
     assert saved[0].read_bytes().startswith(b"image-bytes:")
     assert "purity=100" in web.urls[0] and "q=anime+scenery" in web.urls[0]
+    assert "categories=110" in web.urls[0]
+    assert not list(tmp_path.glob("*.part"))
 
 
 def test_fetch_stops_at_count_and_skips_files_it_already_has(tmp_path):
     (tmp_path / "wallhaven-aaa111.jpg").write_bytes(b"old")
     web = FakeWallhaven({1: [item("aaa111"), item("bbb222")], 2: [item("ccc333"), item("ddd444")]})
-    saved = wallpapers.fetch(tmp_path, 2, opener=web)
+    saved = wallpapers.fetch(tmp_path, 2, "sky", opener=web)
     assert [p.name for p in saved] == ["wallhaven-bbb222.jpg", "wallhaven-ccc333.jpg"]
     assert (tmp_path / "wallhaven-aaa111.jpg").read_bytes() == b"old"
     assert not any("ddd444" in url for url in web.urls)
@@ -222,4 +227,62 @@ def test_fetch_stops_at_count_and_skips_files_it_already_has(tmp_path):
 
 def test_fetch_gives_up_when_results_run_out(tmp_path):
     web = FakeWallhaven({1: [item("aaa111")]})
-    assert len(wallpapers.fetch(tmp_path, 10, opener=web)) == 1
+    assert len(wallpapers.fetch(tmp_path, 10, "sky", opener=web)) == 1
+    assert len(wallpapers.fetch(tmp_path, 10, opener=web, rng=random.Random(1))) == 0
+    assert len(web.urls) < 3 * wallpapers.MAX_ROUNDS            # a varied fetch gives up too
+
+
+def searches(web):
+    return [urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            for url in web.urls if url.startswith(wallpapers.WALLHAVEN_SEARCH)]
+
+
+def test_fetch_without_words_mixes_themes_from_their_best_pages(tmp_path):
+    pages = {page: [item(f"p{page}n{n}") for n in range(24)] for page in range(1, wallpapers.TOP_PAGES + 1)}
+    web = FakeWallhaven(pages)
+    saved = wallpapers.fetch(tmp_path, 8, opener=web, rng=random.Random(7))
+    asked = searches(web)
+    assert len(saved) == 8 and len({p.name for p in saved}) == 8
+    assert len({query["q"][0] for query in asked}) > 1 and len({query["page"][0] for query in asked}) > 1
+    for query in asked:
+        assert query["q"][0] in wallpapers.QUERIES and 1 <= int(query["page"][0]) <= wallpapers.TOP_PAGES
+        assert query["purity"] == ["100"] and query["categories"] == ["110"]
+        assert query["sorting"] == ["favorites"]
+    again = FakeWallhaven(pages)
+    other = tmp_path / "other"
+    assert ([p.name for p in wallpapers.fetch(other, 8, opener=again, rng=random.Random(7))]
+            == [p.name for p in saved])                      # the rng decides, nothing else
+
+
+def test_fetch_without_words_looks_again_when_a_theme_has_fewer_pages(tmp_path):
+    web = FakeWallhaven({1: [item("only11")]})
+    saved = wallpapers.fetch(tmp_path, 1, opener=web, rng=random.Random(3))
+    assert [p.name for p in saved] == ["wallhaven-only11.jpg"]
+    assert searches(web)[-1]["page"] == ["1"]
+
+
+def test_fetch_skips_what_the_library_has_held_before(tmp_path):
+    web = FakeWallhaven({1: [item("aaa111"), item("bbb222"), item("ccc333")]})
+    saved = wallpapers.fetch(tmp_path, 3, "sky", opener=web, seen={"aaa111", "ccc333"})
+    assert [p.name for p in saved] == ["wallhaven-bbb222.jpg"]
+
+
+def aged(folder, name, age):
+    path = folder / name
+    solid((90, 90, 90)).save(path)
+    os.utime(path, (1_000_000 - age, 1_000_000 - age))
+    return path
+
+
+def test_retire_removes_the_oldest_fetched_images_down_to_the_cap(tmp_path):
+    own = aged(tmp_path, "mine.png", 900)
+    oldest, older, newer, newest = (aged(tmp_path, f"wallhaven-{name}.png", age)
+                                    for name, age in (("a", 400), ("b", 300), ("c", 200), ("d", 100)))
+    (tmp_path / "notes.txt").write_text("not an image, not counted")
+    assert wallpapers.retire(tmp_path, 5) == []
+    assert wallpapers.retire(tmp_path, 3, protected=[str(oldest)]) == [older, newer]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "mine.png", "notes.txt", "wallhaven-a.png", "wallhaven-d.png"]
+    # too few candidates: your own image and the protected one stay, over the cap
+    assert wallpapers.retire(tmp_path, 1, protected=[str(oldest)]) == [newest]
+    assert own.is_file() and oldest.is_file()

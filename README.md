@@ -152,8 +152,11 @@ Ricer ships no images. It picks from a folder on your machine, `~/Pictures/Wallp
 default (set `RICER_WALLPAPERS` to use another). The more it holds, the more the looks vary.
 
 ```
-ricer wallpapers fetch --count 20      # SFW anime scenery from wallhaven.cc
+ricer wallpapers fetch --count 20      # a mix of SFW themes from wallhaven.cc
 ricer wallpapers fetch --query "anime sunset landscape"
+ricer wallpapers auto                  # on by default: 3 new images after each look
+ricer wallpapers auto off              # stop that
+ricer wallpapers auto --cap 300        # how many the library holds (200)
 ricer wallpapers add ~/Downloads/some-image.png
 ricer wallpapers list                  # each image with its measured mood
 ```
@@ -161,6 +164,14 @@ ricer wallpapers list                  # each image with its measured mood
 Each image is measured for warmth, colourfulness, detail and brightness; `--warmth` matters
 most when choosing, then `--cool` (vivid) and `--ease` (calm). Fetched images belong to
 their artists and are for your own desktop.
+
+The library refreshes itself. Each `ricer instant` or `ricer reroll` starts a background
+fetch of three new images once the look is applied: a few of the most favourited from a
+randomly drawn theme (landscape, sunset, night city, sky, forest, rain, ocean, mountains,
+stars, street, cyberpunk, anime scenery), from Wallhaven's general and anime categories.
+When the library passes its cap, the oldest fetched images are deleted. Your own images
+are never deleted, nor is any wallpaper the current, previous, recent or default look
+uses, and an image that was removed is not fetched again.
 
 ## Commands
 
@@ -173,6 +184,7 @@ ricer setup                            install the optional extensions
 ricer revert [--all]
 ricer status
 ricer wallpapers list | add FILE... | fetch [--count N] [--query WORDS]
+ricer wallpapers auto [on | off] [--cap N]
 ricer widgets start | stop
 ricer help [COMMAND]                   commands to try, or one command's options
 man ricer                              the manual
@@ -238,7 +250,8 @@ one (a GUI, a model acting as art director) can drive the desktop the same way.
 | `chance.py` | seeded streams; choices tempered by chaos |
 | `generator.py` | dials and seed to a Look, stage by stage (pure) |
 | `compose.py` | candidates, novelty against recent looks, the final choice |
-| `wallpapers.py`, `palette.py` | image analysis, scoring, colours, fetching |
+| `wallpapers.py`, `palette.py` | image analysis, scoring, colours, fetching, retiring |
+| `topup.py` | the background fetch after each look, and its settings |
 | `placement.py`, `metrics.py` | zones, costs, stacking; widget sizes |
 | `engine.py`, `backends.py`, `capabilities.py` | apply, snapshot, revert; the desktop behind an interface with an in-memory fake |
 | `shell_theme.py`, `data/` | the top-bar stylesheet |

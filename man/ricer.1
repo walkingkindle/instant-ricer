@@ -1,5 +1,5 @@
 .\" Manual page for ricer. Kept in step with the command line by tests/test_manpage.py.
-.TH RICER 1 "2026-10-05" "ricer 0.3.0" "User Commands"
+.TH RICER 1 "2026-10-05" "ricer 0.4.0" "User Commands"
 .SH NAME
 ricer \- compose and apply a different GNOME desktop look on every run
 .SH SYNOPSIS
@@ -28,7 +28,7 @@ ricer \- compose and apply a different GNOME desktop look on every run
 .B ricer setup
 .br
 .B ricer wallpapers
-\fBlist\fR | \fBadd\fR \fIFILE\fR... | \fBfetch\fR [\fB\-\-count\fR \fIN\fR] [\fB\-\-query\fR \fIWORDS\fR]
+\fBlist\fR | \fBadd\fR \fIFILE\fR... | \fBfetch\fR [\fB\-\-count\fR \fIN\fR] [\fB\-\-query\fR \fIWORDS\fR] | \fBauto\fR [\fBon\fR | \fBoff\fR] [\fB\-\-cap\fR \fIN\fR]
 .br
 .B ricer widgets
 \fBstart\fR | \fBstop\fR
@@ -183,12 +183,32 @@ Copy images (jpg, jpeg, png or webp) into the library.
 \fBfetch\fR [\fB\-\-count\fR \fIN\fR] [\fB\-\-query\fR \fIWORDS\fR]
 Download up to
 .I N
-new images (12 if not given) from wallhaven.cc that match
-.I WORDS
-("anime scenery" if not given). Only images from its anime category that are
-rated safe for work are requested, in 16:9 and at least 1920x1080, the most
-favourited first. Images the library already has are skipped. The images belong
-to their artists.
+new images (12 if not given) from wallhaven.cc. With
+.IR WORDS ,
+the most favourited images that match them. Without, a mix: a few from each of
+several themes (landscape, sunset, night city, sky, forest, rain, ocean,
+mountains, stars, street, cyberpunk, anime scenery), drawn from each theme's most
+favourited. Only images from its general and anime categories that are rated safe
+for work are requested, in 16:9 and at least 1920x1080. Images the library has, or
+has held before, are skipped. The images belong to their artists.
+.TP
+\fBauto\fR [\fBon\fR | \fBoff\fR] [\fB\-\-cap\fR \fIN\fR]
+With nothing, show the setting. While it is
+.B on
+(as it is until switched off), every look applied by
+.B ricer instant
+or
+.B ricer reroll
+fetches 3 new images in the background, as
+.B fetch
+without words does; they can come up from the next look on. The switch itself
+does not wait for them.
+.B \-\-cap
+sets how many images the library holds (200 if never set). Once it holds more,
+the oldest fetched images are deleted to make room. Images you added yourself are
+never deleted, nor are the wallpapers of the current look, the look
+.B ricer revert
+returns to, the last few looks and the default look.
 .SS ricer widgets
 \fBstart\fR or \fBstop\fR the process that draws the desktop widgets.
 .B ricer instant
@@ -300,6 +320,8 @@ Give the dials more to choose from:
 .EX
 ricer wallpapers fetch \-\-count 20
 ricer wallpapers fetch \-\-query "anime sunset landscape"
+ricer wallpapers auto off
+ricer wallpapers auto on \-\-cap 300
 ricer wallpapers list
 .EE
 .RE
@@ -317,8 +339,14 @@ The default look.
 .I \(ti/.config/ricer/widgets.json
 What the widget process draws. Rewritten by every look; the process follows it.
 .TP
+.I \(ti/.config/ricer/wallpapers.json
+What
+.B ricer wallpapers auto
+was set to.
+.TP
 .I \(ti/.cache/ricer/
-The analysis of each wallpaper, and the widget process's log.
+The analysis of each wallpaper, the widget process's log, which images were
+ever fetched (fetched.json) and what each background fetch did (topup.log).
 .TP
 .I \(ti/.local/share/themes/Ricer/
 The generated top\-bar theme.

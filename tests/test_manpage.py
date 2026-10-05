@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ricer import __version__, cli, wallpapers
+from ricer import __version__, cli, topup
 from ricer.look import DIAL_NAMES, KEEP_PARTS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,10 +41,12 @@ def test_every_command_and_action_is_documented(page):
         if len(words) == 2:                                  # ricer instant, ricer default, ...
             assert f".B {' '.join(words)}" in page, words    # in the synopsis
             assert f".SS {' '.join(words)}" in page, words   # and with a section of its own
-    assert "list | add FILE... | fetch [--count N] [--query WORDS]" in page      # wallpapers' actions
+    assert ("list | add FILE... | fetch [--count N] [--query WORDS] | auto [on | off] [--cap N]"
+            in page)                                         # wallpapers' actions
     for action in ("list", "set", "show", "clear"):
         assert f"\n.B {action}\n" in page, action             # each described in its own entry
     assert "\nadd FILE...\n" in page and "\nfetch [--count N] [--query WORDS]\n" in page
+    assert "\nauto [on | off] [--cap N]\n" in page
     assert "[set | show | clear]" in page and "start | stop" in page and "start or stop the process" in page
 
 
@@ -57,7 +59,7 @@ def test_every_option_is_documented(page):
                     seen.add(option)
                     assert option in page, option
     assert {"--cool", "--ease", "--warmth", "--chaos", "--all", "--seed", "--keep", "--dry-run",
-            "--json", "--count", "--query", "--version"} == seen
+            "--json", "--count", "--query", "--cap", "--version"} == seen
 
 
 def test_dials_keep_parts_and_defaults_match_the_code(page):
@@ -66,7 +68,8 @@ def test_dials_keep_parts_and_defaults_match_the_code(page):
     for part in KEEP_PARTS:
         assert re.search(rf"^\.BR? {part}\b", page, re.M), part
     assert f"({cli.DEFAULT_FETCH} if not given)" in page
-    assert f'("{wallpapers.DEFAULT_QUERY}" if not given)' in page
+    assert f"({topup.DEFAULT_CAP} if never set)" in page
+    assert f"fetches {topup.TOPUP_COUNT} new images" in page
     assert "left out is 5" in page and cli.DEFAULT_DIAL == 5
 
 

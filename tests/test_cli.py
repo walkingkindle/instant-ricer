@@ -5,7 +5,7 @@ import random
 import pytest
 from PIL import Image
 
-from ricer import cli, wallpapers
+from ricer import cli, topup
 from ricer.backends import FakeBackend
 from ricer.capabilities import (BLUR_UUID, DOCK_SCHEMA, MEDIA_CONTROLS_UUID, OPTIONAL_EXTENSIONS,
                                 USER_THEME_UUID, VITALS_UUID)
@@ -318,21 +318,53 @@ def test_wallpapers_list_and_add(app, tmp_path, capsys):
 def test_wallpapers_fetch_uses_the_library_folder(app, monkeypatch, capsys):
     seen = {}
 
-    def fake_fetch(directory, count, query):
-        seen.update(directory=directory, count=count, query=query)
-        return [directory / "wallhaven-x.jpg"]
+    def fake_fetch(paths, count, query):
+        seen.update(directory=paths.wallpapers, count=count, query=query)
+        return [paths.wallpapers / "wallhaven-x.jpg"]
 
-    monkeypatch.setattr(wallpapers, "fetch", fake_fetch)
+    monkeypatch.setattr(topup, "gather", fake_fetch)
     code, text = run(app, "wallpapers", "fetch", "--count", "3")
     assert code == 0 and "1 new wallpaper in" in text
-    assert seen == {"directory": app.paths.wallpapers, "count": 3, "query": "anime scenery"}
+    assert seen == {"directory": app.paths.wallpapers, "count": 3, "query": None}
 
     def offline(*_args):
         raise OSError("no network")
 
-    monkeypatch.setattr(wallpapers, "fetch", offline)
+    monkeypatch.setattr(topup, "gather", offline)
     assert run(app, "wallpapers", "fetch")[0] == 1
     assert "no network" in capsys.readouterr().err
+
+
+class FakeTopUp:
+    def __init__(self, starts=True):
+        self.starts, self.calls = starts, 0
+
+    def start(self):
+        self.calls += 1
+        return self.starts
+
+
+def test_a_look_starts_a_top_up_but_a_dry_run_does_not(app):
+    app.topup = FakeTopUp()
+    assert "new wallpapers in the background" not in run(app, "instant", "--dry-run")[1]
+    assert app.topup.calls == 0
+    assert "new wallpapers in the background" in run(app, "instant")[1]
+    assert "new wallpapers in the background" in run(app, "reroll")[1]
+    assert app.topup.calls == 2
+    app.topup = FakeTopUp(starts=False)                      # switched off: nothing said
+    assert "new wallpapers" not in run(app, "instant")[1]
+
+
+def test_wallpapers_auto_shows_and_changes_the_setting(app):
+    assert "on (new ones after each look, up to 200)" in run(app, "wallpapers", "auto")[1]
+    assert not app.paths.library_settings.exists()           # only looking writes nothing
+    assert "off" in run(app, "wallpapers", "auto", "off", "--cap", "50")[1]
+    assert topup.load_settings(app.paths) == topup.Settings(auto=False, cap=50)
+    assert "no new ones after a look" in run(app, "status")[1]
+    assert "up to 50" in run(app, "wallpapers", "auto", "on")[1]
+    assert topup.load_settings(app.paths) == topup.Settings(auto=True, cap=50)
+    with pytest.raises(SystemExit):
+        run(app, "wallpapers", "auto", "--cap", "0")
 
 
 def test_widgets_start_and_stop(app, capsys):

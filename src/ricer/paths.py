@@ -12,7 +12,7 @@ THEME_NAME = "Ricer"
 class Paths:
     home: Path
     config: Path                     # state.json, widgets.json
-    cache: Path                      # wallpaper analysis, daemon pid and log
+    cache: Path                      # wallpaper analysis, fetched ids, daemon pid and logs
     data: Path                       # XDG data home: themes live under here
     wallpapers: Path
 
@@ -42,6 +42,24 @@ class Paths:
     @property
     def wallpaper_cache(self) -> Path:
         return self.cache / "wallpapers.json"
+
+    @property
+    def library_settings(self) -> Path:
+        """Whether new wallpapers are fetched after each look, and how many are kept."""
+        return self.config / "wallpapers.json"
+
+    @property
+    def fetched_file(self) -> Path:
+        """Ids of every image ever downloaded, so one that was removed does not come back."""
+        return self.cache / "fetched.json"
+
+    @property
+    def topup_lock(self) -> Path:
+        return self.cache / "topup.lock"
+
+    @property
+    def topup_log(self) -> Path:
+        return self.cache / "topup.log"
 
     @property
     def pid_file(self) -> Path:

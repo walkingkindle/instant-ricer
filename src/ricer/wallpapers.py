@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
 import shutil
 import urllib.parse
@@ -26,8 +27,14 @@ BUSY_GAIN = 9.0                      # stretches local detail so busy artwork la
 SUBJECT_FLOOR = 10.0                 # raw stand-out level below which nothing counts as a subject
 CACHE_VERSION = 5
 WALLHAVEN_SEARCH = "https://wallhaven.cc/api/v1/search"
-DEFAULT_QUERY = "anime scenery"
-MAX_PAGES = 5
+# Themes a fetch without search words draws from. Each has hundreds of well-liked images.
+QUERIES = ("landscape", "sunset", "night city", "sky", "forest", "rain", "ocean", "mountains",
+           "stars", "street", "cyberpunk", "anime scenery")
+CATEGORIES = "110"                   # general and anime, not people
+MAX_PAGES = 5                        # how deep a search for given words goes
+TOP_PAGES = 8                        # a theme's most favourited pages, any of which may be drawn
+MAX_ROUNDS = 12                      # theme-and-page draws before a varied fetch gives up
+FETCHED_PREFIX = "wallhaven-"        # files ricer downloaded; only these are ever retired
 USER_AGENT = f"ricer/{__version__}"
 
 
@@ -249,7 +256,10 @@ class Library:
             ))
         if fresh != cache:
             self.cache_file.parent.mkdir(parents=True, exist_ok=True)
-            self.cache_file.write_text(json.dumps(fresh))
+            # whole or not at all: a background top-up may be scanning at the same time
+            partial = self.cache_file.with_name(f"{self.cache_file.name}.{os.getpid()}.tmp")
+            partial.write_text(json.dumps(fresh))
+            os.replace(partial, self.cache_file)
         return found
 
     def add(self, source: Path) -> Path:
@@ -266,14 +276,32 @@ class Library:
         return target
 
 
-def fetch(directory: Path, count: int, query: str = DEFAULT_QUERY,
-          opener=urllib.request.urlopen) -> list[Path]:
+def images_in(directory: Path) -> list[Path]:
+    directory = Path(directory)
+    if not directory.is_dir():
+        return []
+    return sorted(path for path in directory.iterdir()
+                  if path.suffix.lower() in IMAGE_EXTENSIONS and path.is_file())
+
+
+def fetched_id(path: Path) -> str | None:
+    """The Wallhaven id of a file ricer downloaded; None for any other file."""
+    name = Path(path).name
+    return Path(name).stem[len(FETCHED_PREFIX):] if name.startswith(FETCHED_PREFIX) else None
+
+
+def fetch(directory: Path, count: int, query: str | None = None, opener=urllib.request.urlopen,
+          rng: random.Random | None = None, seen=()) -> list[Path]:
     """Download up to `count` new SFW wallpapers from Wallhaven into `directory`.
 
-    Files already present are skipped and do not count. `opener` is replaceable for tests.
+    With `query`, its most favourited results in order. Without, a mix: each round draws a
+    theme from QUERIES and one of its most favourited pages, and takes a few from there.
+    Files already present and ids in `seen` are skipped and do not count. `opener` is
+    replaceable for tests.
     """
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    seen = set(seen)
     saved: list[Path] = []
 
     def get(url: str) -> bytes:
@@ -281,21 +309,63 @@ def fetch(directory: Path, count: int, query: str = DEFAULT_QUERY,
         with opener(request, timeout=30) as response:
             return response.read()
 
-    for page in range(1, MAX_PAGES + 1):
+    def search(words: str, page: int) -> dict:
         params = urllib.parse.urlencode({
-            "q": query, "categories": "010", "purity": "100", "atleast": "1920x1080",
+            "q": words, "categories": CATEGORIES, "purity": "100", "atleast": "1920x1080",
             "ratios": "16x9", "sorting": "favorites", "order": "desc", "page": page,
         })
-        results = json.loads(get(f"{WALLHAVEN_SEARCH}?{params}")).get("data", [])
-        if not results:
-            break
+        return json.loads(get(f"{WALLHAVEN_SEARCH}?{params}"))
+
+    def take(results: list[dict], limit: int) -> None:
+        """Save up to `limit` of these results, never going past `count` overall."""
+        limit = min(count, len(saved) + limit)
         for item in results:
-            if len(saved) >= count:
-                return saved
+            if len(saved) >= limit:
+                return
             suffix = Path(urllib.parse.urlparse(item["path"]).path).suffix.lower()
-            target = directory / f"wallhaven-{item['id']}{suffix}"
-            if suffix not in IMAGE_EXTENSIONS or target.exists():
+            target = directory / f"{FETCHED_PREFIX}{item['id']}{suffix}"
+            if suffix not in IMAGE_EXTENSIONS or item["id"] in seen or target.exists():
                 continue
-            target.write_bytes(get(item["path"]))
+            # under another name until it is whole: a look may be composed meanwhile
+            partial = target.with_name(target.name + ".part")
+            partial.write_bytes(get(item["path"]))
+            os.replace(partial, target)
             saved.append(target)
+
+    if query is not None:
+        for page in range(1, MAX_PAGES + 1):
+            results = search(query, page).get("data", [])
+            if not results or len(saved) >= count:
+                break
+            take(results, count)
+        return saved
+
+    rng = rng or random.Random()
+    for _ in range(MAX_ROUNDS):
+        if len(saved) >= count:
+            break
+        words, page = rng.choice(QUERIES), rng.randint(1, TOP_PAGES)
+        found = search(words, page)
+        last = int(found.get("meta", {}).get("last_page") or 0)
+        if not found.get("data") and 1 <= last < page:       # the theme has fewer pages than that
+            found = search(words, rng.randint(1, last))
+        results = list(found.get("data", []))
+        rng.shuffle(results)
+        take(results, max(1, count // 4))                    # a few from each, so themes mix
     return saved
+
+
+def retire(directory: Path, cap: int, protected=()) -> list[Path]:
+    """Delete the oldest downloaded images until the folder holds at most `cap`.
+
+    Only files ricer fetched are candidates, and never one in `protected`; if that leaves too
+    few to remove, the folder stays over the cap.
+    """
+    images = images_in(directory)
+    keep = {str(path) for path in protected}
+    fetched = sorted((path for path in images if fetched_id(path) and str(path) not in keep),
+                     key=lambda path: (path.stat().st_mtime, path.name))
+    gone = fetched[:max(0, len(images) - cap)]
+    for path in gone:
+        path.unlink()
+    return gone

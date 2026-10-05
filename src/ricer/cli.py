@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ricer import __version__, wallpapers
+from ricer import __version__, topup
 from ricer.capabilities import (BLUR_UUID, OPTIONAL_EXTENSIONS, USER_THEME_UUID, Capabilities, detect)
 from ricer.compose import compose
 from ricer.daemonctl import DaemonControl
@@ -15,6 +15,7 @@ from ricer.engine import ApplyError, Engine, build_plan
 from ricer.generator import Kept, kept_from
 from ricer.look import DIAL_MAX, DIAL_MIN, DIAL_NAMES, KEEP_PARTS, Dials, Look
 from ricer.paths import Paths
+from ricer.topup import TopUp
 from ricer.wallpapers import Library, NoWallpapersError
 
 DEFAULT_DIAL = 5
@@ -65,6 +66,7 @@ class App:
     env: dict | None = None
     fonts: frozenset | None = None                           # None: ask the system
     screen: tuple | None = None
+    topup: object | None = None                              # None: no fetching after a look
 
     @property
     def library(self) -> Library:
@@ -81,7 +83,7 @@ class App:
 def default_app() -> App:
     from ricer.backends import GnomeBackend
     paths = Paths.from_env()
-    return App(paths=paths, backend=GnomeBackend(), daemon=DaemonControl(paths))
+    return App(paths=paths, backend=GnomeBackend(), daemon=DaemonControl(paths), topup=TopUp(paths))
 
 
 def dial(text: str) -> int:
@@ -91,6 +93,16 @@ def dial(text: str) -> int:
         raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
     if not DIAL_MIN <= value <= DIAL_MAX:
         raise argparse.ArgumentTypeError(f"must be between {DIAL_MIN} and {DIAL_MAX}")
+    return value
+
+
+def positive(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be 1 or more")
     return value
 
 
@@ -162,8 +174,15 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = wall_commands.add_parser("fetch", help="download SFW wallpapers from Wallhaven")
     fetch.add_argument("--count", type=int, default=DEFAULT_FETCH, metavar="N",
                        help=f"how many new images to get (default {DEFAULT_FETCH})")
-    fetch.add_argument("--query", default=wallpapers.DEFAULT_QUERY, metavar="WORDS",
-                       help=f"search words (default: {wallpapers.DEFAULT_QUERY!r})")
+    fetch.add_argument("--query", metavar="WORDS",
+                       help="search words (default: a mix of themes)")
+    auto = wall_commands.add_parser(
+        "auto", help="fetch a few new wallpapers after each look, or stop doing so",
+        description="With nothing, shows the setting. When the library is full, the oldest "
+                    "fetched images make room for new ones.")
+    auto.add_argument("switch", nargs="?", choices=("on", "off"))
+    auto.add_argument("--cap", type=positive, metavar="N",
+                      help=f"how many images the library holds (default {topup.DEFAULT_CAP})")
 
     widgets = command("widgets")
     widgets.add_argument("action", choices=("start", "stop"))
@@ -306,6 +325,8 @@ def cmd_look(app: App, args, out) -> int:
         print(f"note: {notice}", file=out)
     print("Applied." if result.changed else "No changes: this look is already applied.", file=out)
     print(_again(look, args.keep), file=out)
+    if app.topup and app.topup.start():
+        print("Getting a few new wallpapers in the background.", file=out)
     return 0
 
 
@@ -407,8 +428,15 @@ def cmd_status(app: App, _args, out) -> int:
     print("\nThis desktop:", file=out)
     for feature, available, note in app.capabilities().report():
         print(f"  {'yes' if available else 'no ':3}  {feature}{f' ({note})' if note else ''}", file=out)
-    print(f"\nWallpapers: {len(app.library.scan())} in {app.paths.wallpapers}", file=out)
+    print(f"\nWallpapers: {len(app.library.scan())} in {app.paths.wallpapers} "
+          f"({_auto(topup.load_settings(app.paths))})", file=out)
     return 0
+
+
+def _auto(settings: topup.Settings) -> str:
+    if settings.auto:
+        return f"new ones after each look, up to {settings.cap}"
+    return "no new ones after a look"
 
 
 def cmd_wallpapers(app: App, args, out) -> int:
@@ -431,8 +459,16 @@ def cmd_wallpapers(app: App, args, out) -> int:
                 print(f"skipped {name}: {error}", file=sys.stderr)
                 status = 1
         return status
+    if args.wallpaper_command == "auto":
+        settings = topup.load_settings(app.paths)
+        if args.switch or args.cap:
+            settings = topup.Settings(auto=args.switch != "off" if args.switch else settings.auto,
+                                      cap=args.cap or settings.cap)
+            topup.save_settings(app.paths, settings)
+        print(f"Automatic wallpapers: {'on' if settings.auto else 'off'} ({_auto(settings)}).", file=out)
+        return 0
     try:
-        saved = wallpapers.fetch(app.paths.wallpapers, args.count, args.query)
+        saved = topup.gather(app.paths, args.count, args.query)
     except OSError as error:
         print(f"Download failed: {error}", file=sys.stderr)
         return 1
