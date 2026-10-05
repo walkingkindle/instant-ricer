@@ -144,7 +144,8 @@ def dials_from(args, base: Dials | None = None) -> Dials:
 
 def _style_line(look: Look) -> str:
     style = look.style
-    cards = "no cards" if style.fill == 0 else f"{style.border} cards at {round(style.fill * 100)}%"
+    edge = {"none": "plain", "hairline": "hairline", "accent": "outlined"}[style.border]
+    cards = "no cards" if style.fill == 0 else f"{edge} cards at {round(style.fill * 100)}%"
     weight = "thin" if style.weight < 0.25 else "light" if style.weight < 0.45 else \
         "regular" if style.weight < 0.65 else "heavy"
     return (f"{cards}, radius {style.radius}, {weight} {style.voice} type, "

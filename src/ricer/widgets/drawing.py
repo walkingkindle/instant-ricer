@@ -13,6 +13,11 @@ from gi.repository import Pango, PangoCairo
 from ricer.widgets.style import Style
 
 SHADOW = ((4, 0.14), (2, 0.24), (1, 0.34))                   # offset px, opacity
+# Widgets are drawn on transparent windows. Sub-pixel (LCD) text rendering assumes an opaque
+# background and leaves coloured fringes there, so text is always smoothed in plain grey.
+FONT_OPTIONS = cairo.FontOptions()
+FONT_OPTIONS.set_antialias(cairo.ANTIALIAS_GRAY)
+FONT_OPTIONS.set_hint_style(cairo.HINT_STYLE_SLIGHT)
 
 
 def rounded_rect(cr, x, y, w, h, r):
@@ -27,6 +32,8 @@ def rounded_rect(cr, x, y, w, h, r):
 
 def make_layout(cr, text, font, spacing=0, width=None):
     layout = PangoCairo.create_layout(cr)
+    PangoCairo.context_set_font_options(layout.get_context(), FONT_OPTIONS)
+    layout.context_changed()
     layout.set_font_description(Pango.FontDescription(font))
     if spacing:
         attrs = Pango.AttrList()
@@ -84,7 +91,14 @@ def draw_text(cr, text, font, x, y, color, alpha=1.0, spacing=0, width=None, ali
     elif align == "right":
         x -= w
     if shadow:
-        # soft drop shadow so text with no card behind it stays readable on bright wallpapers
+        # Text with no card behind it has to survive whatever the wallpaper does there: a dark
+        # halo hugging the letters for busy backgrounds, a soft drop shadow for bright ones.
+        cr.move_to(x + dx, y + dy)
+        PangoCairo.layout_path(cr, layout)
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.set_line_width(min(5.0, max(2.5, ink_box.height * 0.09)))
+        cr.set_source_rgba(0, 0, 0, 0.30 * alpha)
+        cr.stroke()
         for offset, opacity in SHADOW:
             cr.move_to(x + dx, y + dy + offset)
             cr.set_source_rgba(0, 0, 0, opacity * alpha)

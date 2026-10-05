@@ -57,11 +57,20 @@ def test_grid_finds_a_subject_that_stands_out_and_none_in_a_flat_picture():
     assert max(flat.subject) == 0 and max(flat.busy) == 0
 
 
-def test_dark_or_flat_areas_are_background_not_subject():
+def test_flat_areas_are_background_not_subject():
     scene = two_tone((6, 8, 14), (120, 110, 100), size=(384, 216))
     grid = analyse_grid(scene)
-    assert cells(grid, grid.subject, 0.0, 0.45) < 0.05       # dark and empty
-    assert cells(grid, grid.subject, 0.55, 1.0) < 0.35       # brighter, but flat: barely counts
+    assert cells(grid, grid.subject, 0.0, 0.45) < 0.2        # dark and empty
+    assert cells(grid, grid.subject, 0.55, 1.0) < 0.35       # brighter, but just as flat
+
+
+def test_a_dark_detailed_shape_against_a_bright_sky_is_a_subject():
+    scene = solid((235, 170, 110), size=(384, 216))          # a flat sunset sky
+    figure = noise(4, (60, 120)).convert("L").point(lambda v: v // 6)       # dark, with detail
+    scene.paste(Image.merge("RGB", (figure, figure, figure)), (160, 80))
+    grid = analyse_grid(scene)
+    assert cells(grid, grid.subject, 0.44, 0.56, 0.42, 0.88) > 0.6          # the silhouette
+    assert cells(grid, grid.subject, 0.0, 0.3) < 0.1 and cells(grid, grid.subject, 0.7, 1.0) < 0.1
 
 
 def test_grid_region_weights_cells_by_how_much_of_them_is_covered():

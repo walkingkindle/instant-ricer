@@ -41,13 +41,15 @@ TEMPLATES = {
         "*": {"right": 0.0},
     },
     "stage": {                        # the clock takes centre stage, the rest flank it
-        "clock": {"top-center": 0.0, "center": 0.2},
+        "clock": {"top-center": 0.0, "center": 0.3},
         "greeting": {"top-center": 0.0, "bottom-center": 0.25},
         "media": {"left": 0.0, "bottom-left": 0.2},
         "ornament": {"bottom-center": 0.1, "bottom-right": 0.1, "bottom-left": 0.2},
         "*": {"right": 0.0, "left": 0.12},
     },
-    "scatter": {"*": {anchor: 0.0 for anchor in ANCHORS}},   # wherever the wallpaper is calm
+    # wherever the wallpaper is calm; the very middle is where pictures keep their subject,
+    # so it has to be clearly the best spot before anything goes there
+    "scatter": {"*": {anchor: (0.25 if anchor == "center" else 0.0) for anchor in ANCHORS}},
 }
 
 
@@ -166,13 +168,14 @@ def is_calm(stats: tuple[float, float, float]) -> bool:
     return stats[0] < CALM_BUSY and stats[1] < CALM_BRIGHT
 
 
-def _rects(boxes, anchors, area, insets) -> dict[int, tuple[int, int, int, int]]:
+def rectangles(boxes, anchors, area, insets) -> dict[int, tuple[int, int, int, int]]:
+    """(x, y, width, height) of every box that has a zone, keyed by its index."""
     order = [i for i in range(len(boxes)) if anchors.get(i)]
     spots = arrange([(anchors[i], boxes[i].width, boxes[i].height) for i in order], area, insets)
     return {i: (x, y, boxes[i].width, boxes[i].height) for i, (x, y) in zip(order, spots)}
 
 
-def _clear(rects: dict, area, insets) -> bool:
+def fits(rects: dict, area, insets) -> bool:
     """True if every rectangle is on screen and none touch."""
     ax, ay, aw, ah = area
     left, right, bottom = insets
@@ -199,7 +202,7 @@ def total_cost(boxes: list[Box], anchors: dict, wallpaper: Wallpaper, screen, te
                mirrored: bool, insets=(0, 0, 0)) -> float:
     """How good a finished placement is; lower is better."""
     table = template_costs(template, mirrored)
-    rects = _rects(boxes, anchors, planning_area(screen), insets)
+    rects = rectangles(boxes, anchors, planning_area(screen), insets)
     cost = DROPPED * sum(1 for i in range(len(boxes)) if not anchors.get(i))
     sharing: dict[str, int] = {}
     for i, rect in rects.items():
@@ -228,8 +231,8 @@ def assign(boxes: list[Box], wallpaper: Wallpaper, screen: tuple[int, int], temp
             for anchor in ANCHORS:
                 if anchor in forbidden:
                     continue
-                rects = _rects(boxes, {**chosen, i: anchor}, area, insets)
-                if _clear(rects, area, insets):
+                rects = rectangles(boxes, {**chosen, i: anchor}, area, insets)
+                if fits(rects, area, insets):
                     costs[anchor] = (region_cost(region(wallpaper, screen, rects[i]))
                                      + zones.get(anchor, OFF_TEMPLATE)
                                      + STACK_COST[template] * list(chosen.values()).count(anchor))

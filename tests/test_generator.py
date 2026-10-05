@@ -126,6 +126,12 @@ def test_cards_get_more_opaque_over_a_busy_wallpaper(wallpaper_set, lopsided):
     assert card_fill(big_clock, Style(fill=0.6), busy) == 0.0          # big text carries itself
     assert card_fill(big_clock, Style(fill=0.6), (0.1, 0.8, 0.0)) == 0.45   # except on near-white
     assert card_fill(small_clock, Style(fill=0.6), calm) == 0.6
+    dial = WidgetSpec("clock", "analog", "top-right", {"size": 110})
+    assert card_fill(dial, Style(fill=0.6), calm) == 0.0 and card_fill(dial, Style(fill=0.0), busy) == 0.5
+    assert card_fill(dial, Style(fill=0.8), (0.25, 0.3, 0.0)) == 0.8          # merely not calm is enough
+    greeting = WidgetSpec("greeting", "plain", "top-left")
+    assert card_fill(greeting, Style(fill=0.3), calm) == 0.0           # free-standing where it can be
+    assert card_fill(greeting, Style(fill=0.3), busy) == 0.55 and card_fill(greeting, Style(fill=0.7), busy) == 0.7
     line = WidgetSpec("system", "line", "left")
     assert card_fill(line, Style(fill=0.0), busy) == 0.5 and card_fill(line, Style(fill=0.0), calm) == 0.0
 

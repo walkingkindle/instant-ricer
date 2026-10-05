@@ -105,7 +105,7 @@ def test_plan_puts_widgets_in_the_bar_through_the_two_extensions(look, full_caps
     assert s[engine.VITALS + "hot-sensors"] == "['_processor_usage_', '_memory_usage_', '__temperature_avg__']"
     assert s[engine.VITALS + "position-in-panel"] == "2" and s[engine.VITALS + "show-battery"] == "false"
     assert s[engine.MEDIA + "extension-position"] == "'Left'"
-    assert s[engine.MEDIA + "extension-index"] == "uint32 0"
+    assert s[engine.MEDIA + "extension-index"] == "uint32 1"         # after the workspace indicator
     assert s[engine.MEDIA + "label-width"] == f"uint32 {round(200 * look.style.scale)}"
     assert s[engine.MEDIA + "show-control-icons-seek-forward"] == "false"
 
@@ -115,6 +115,8 @@ def test_plan_puts_widgets_in_the_bar_through_the_two_extensions(look, full_caps
     assert "'__network-rx_max__', '_battery_percentage_'" in s[engine.VITALS + "hot-sensors"]
     assert s[engine.VITALS + "position-in-panel"] == "0" and s[engine.VITALS + "show-battery"] == "true"
     assert s[engine.MEDIA + "extension-position"] == "'Center'"
+    on_the_right = dataclasses.replace(look, bar=Bar(media=True, media_side="right"))
+    assert build_plan(on_the_right, full_caps, paths).settings[engine.MEDIA + "extension-index"] == "uint32 0"
 
 
 def test_a_look_with_an_empty_bar_switches_the_extensions_off(plain, full_caps, paths):

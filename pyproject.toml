@@ -3,13 +3,14 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ricer"
-version = "0.1.0"
-description = "Instant desktop ricing for GNOME: three dials pick a wallpaper, colours, bar, dock and widgets."
+name = "instant-ricer"
+version = "0.2.0"
+description = "A desktop ricing engine for GNOME: four dials, a different look on every run."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "walkingkindle" }]
+urls = { Repository = "https://github.com/walkingkindle/instant-ricer" }
 keywords = ["gnome", "rice", "theme", "wallpaper", "desktop"]
 classifiers = [
     "Environment :: X11 Applications :: GTK",

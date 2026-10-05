@@ -160,7 +160,8 @@ def _bar(look: Look, caps: Capabilities, plan: Plan, paths: Paths, yaru: str) ->
         plan.extensions[MEDIA_CONTROLS_UUID] = bar.media
         if bar.media:
             settings[MEDIA + "extension-position"] = gv(bar.media_side.capitalize())
-            settings[MEDIA + "extension-index"] = gv_uint(0)
+            # after the workspace indicator or the clock; ahead of everything on the right
+            settings[MEDIA + "extension-index"] = gv_uint(0 if bar.media_side == "right" else 1)
             settings[MEDIA + "label-width"] = gv_uint(round(200 * look.style.scale))
             settings[MEDIA + "show-label"] = gv(True)
             settings[MEDIA + "show-player-icon"] = gv(True)

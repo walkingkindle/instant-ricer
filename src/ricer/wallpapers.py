@@ -24,7 +24,7 @@ GRID_COLS, GRID_ROWS = 32, 18        # resolution of the per-wallpaper placement
 CELL = 8                             # thumbnail pixels per grid cell when measuring
 BUSY_GAIN = 9.0                      # stretches local detail so busy artwork lands near 1
 SUBJECT_FLOOR = 10.0                 # raw stand-out level below which nothing counts as a subject
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 WALLHAVEN_SEARCH = "https://wallhaven.cc/api/v1/search"
 DEFAULT_QUERY = "anime scenery"
 MAX_PAGES = 5
@@ -146,14 +146,16 @@ def analyse_grid(image, cols: int = GRID_COLS, rows: int = GRID_ROWS) -> Grid:
             n = CELL * CELL
             busy.append(min(1.0, edges / (2 * n) / 255 * BUSY_GAIN))
             bright.append(light / n / 255)
-            # what stands out: a colour unlike the rest, or being brighter than the rest.
-            # Being darker does not count: a dark empty sky is background, not subject.
+            # what stands out: a colour unlike the rest, or a brightness unlike the rest.
+            # Darker counts for less than brighter, and (below) only where there is detail:
+            # a silhouette against a sunset is a subject, an empty night sky is background.
             colour = math.hypot(sums[1] / n - mean[1], sums[2] / n - mean[2])
-            standout.append(colour + 0.5 * max(0.0, sums[0] / n - mean[0]))
+            lighter = sums[0] / n - mean[0]
+            standout.append(colour + (0.5 * lighter if lighter > 0 else -0.35 * lighter))
 
     busy = _blur(busy, cols, rows)
     # a subject also has detail and some light; flat or dark areas are background
-    raw = _blur([s * (0.1 + 0.9 * b) * (0.4 + 0.6 * light)
+    raw = _blur([s * (0.1 + 0.9 * b) * (0.55 + 0.45 * light)
                  for s, b, light in zip(standout, busy, bright)], cols, rows)
     # scale to the picture's own strongest area; a small subject must not be drowned out by
     # the 97th percentile, nor a single hot cell define the scale

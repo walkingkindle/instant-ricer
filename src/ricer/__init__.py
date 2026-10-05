@@ -1,3 +1,3 @@
-"""Instant desktop ricing for GNOME."""
+"""A desktop ricing engine for GNOME: four dials, a different look on every run."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

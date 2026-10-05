@@ -18,6 +18,7 @@ from ricer.wallpapers import Wallpaper, choose
 
 SCREEN = (1920, 1080)
 MAX_WIDGETS = 6
+COLUMN_WIDTH = (280, 340)            # px before scaling: the range a stack of cards may share
 PLACEMENT_KEYS = ("fill", "width", "align")              # options that placement decides
 
 
@@ -221,6 +222,12 @@ def card_fill(spec: WidgetSpec, style: Style, stats: tuple[float, float, float])
         return 0.5 if placement.needs_card(stats) else 0.0
     if spec.type == "clock" and spec.design == "digital" and spec.options.get("size", 100) <= 76:
         return style.fill                                    # a small clock sits in a card like the rest
+    if spec.type == "greeting":                              # two lines of modest text
+        return max(style.fill, 0.55) if placement.needs_card(stats) else 0.0
+    if spec.type == "clock" and spec.design == "analog":
+        # thin hands and marks are the first thing to get lost: only over a calm, dark
+        # patch of wallpaper does the dial go without a face
+        return 0.0 if placement.is_calm(stats) else max(style.fill, 0.5)
     return 0.45 if stats[1] > 0.68 else 0.0                  # big text needs help only on near-white
 
 
@@ -238,15 +245,17 @@ def _match_widths(specs: list[WidgetSpec], style: Style, screen, insets) -> list
     for members in groups.values():
         if len(members) < 2:
             continue
-        width = max(metrics.nominal(specs[i].type, specs[i].design, specs[i].options, 1.0)[0]
-                    for i in members)
+        widest = max(metrics.nominal(specs[i].type, specs[i].design, specs[i].options, 1.0)[0]
+                     for i in members)
+        # not simply the widest: one wide card would blow a small calendar up to match it
+        width = max(COLUMN_WIDTH[0], min(COLUMN_WIDTH[1], widest))
         trial = list(specs)
         for i in members:
             trial[i] = replace(specs[i], options={**specs[i].options, "width": width})
         boxes = _boxes(trial, style.scale)
         anchors = {i: spec.anchor for i, spec in enumerate(trial)}
         area = placement.planning_area(screen)
-        if placement._clear(placement._rects(boxes, anchors, area, insets), area, insets):
+        if placement.fits(placement.rectangles(boxes, anchors, area, insets), area, insets):
             specs = trial
     return specs
 
@@ -264,7 +273,7 @@ def place(specs: list[WidgetSpec], style: Style, wallpaper: Wallpaper, dock: Doc
     specs = _match_widths(specs, style, screen, insets)
 
     boxes = _boxes(specs, style.scale)
-    rects = placement._rects(boxes, {i: spec.anchor for i, spec in enumerate(specs)},
+    rects = placement.rectangles(boxes, {i: spec.anchor for i, spec in enumerate(specs)},
                              placement.planning_area(screen), insets)
     fills = [card_fill(spec, style, placement.region(wallpaper, screen, rects[index]))
              for index, spec in enumerate(specs)]

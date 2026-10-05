@@ -136,8 +136,8 @@ def test_placed_widgets_never_overlap_and_stay_on_screen(wallpaper_set, template
             ("clock", "media", "system", "calendar", "progress", "ornament"), sizes)]
         anchors = run(box_list, wallpaper_set[seed % len(wallpaper_set)], seed, chaos, template,
                       mirrored=bool(seed % 2))
-        rects = placement._rects(box_list, anchors, area, (0, 0, 0))
-        assert placement._clear(rects, area, (0, 0, 0))
+        rects = placement.rectangles(box_list, anchors, area, (0, 0, 0))
+        assert placement.fits(rects, area, (0, 0, 0))
         assert len(rects) == sum(1 for anchor in anchors.values() if anchor)
 
 
@@ -146,8 +146,8 @@ def test_what_cannot_fit_is_dropped_not_overlapped(wallpaper_set):
     anchors = run(huge, wallpaper_set[0], chaos=5)
     placed = [a for a in anchors.values() if a]
     assert 1 <= len(placed) < 5 and None in anchors.values()
-    rects = placement._rects(huge, anchors, planning_area(SCREEN), (0, 0, 0))
-    assert placement._clear(rects, planning_area(SCREEN), (0, 0, 0))
+    rects = placement.rectangles(huge, anchors, planning_area(SCREEN), (0, 0, 0))
+    assert placement.fits(rects, planning_area(SCREEN), (0, 0, 0))
 
 
 def test_the_column_layout_stacks_on_one_side_and_mirroring_flips_it(wallpaper_set):
