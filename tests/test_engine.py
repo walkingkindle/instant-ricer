@@ -229,6 +229,28 @@ def test_extensions_are_switched_on_only_after_they_are_configured(look, full_ca
     assert order.index(engine.MEDIA + "extension-position") < order.index(MEDIA_CONTROLS_UUID)
 
 
+def test_vitals_is_restarted_when_its_sensor_list_changes_while_it_stays_on(look, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    assert backend.writes.count(VITALS_UUID) == 1            # switched on once; no restart needed
+
+    backend.writes.clear()
+    more = dataclasses.replace(look, bar=dataclasses.replace(look.bar, stats=("cpu", "ram", "temp", "net")))
+    eng.apply(more, full_caps)
+    assert backend.writes.count(VITALS_UUID) == 2 and backend.extensions[VITALS_UUID] is True
+    assert backend.writes.index(engine.VITALS + "hot-sensors") < backend.writes.index(VITALS_UUID)
+
+    backend.writes.clear()                                   # a change it picks up by itself: no restart
+    eng.apply(dataclasses.replace(more, bar=dataclasses.replace(more.bar, stats_side="left")), full_caps)
+    assert VITALS_UUID not in backend.writes
+
+    eng.apply(look, full_caps)                               # back to three sensors
+    backend.writes.clear()
+    eng.revert()                                             # undoing that restores four: restart again
+    assert backend.writes.count(VITALS_UUID) == 2 and backend.extensions[VITALS_UUID] is True
+    assert "'__network-rx_max__'" in backend.values[engine.VITALS + "hot-sensors"]
+
+
 def test_applying_the_same_look_twice_changes_nothing(look, full_caps, paths, backend):
     eng = Engine(backend, paths)
     eng.apply(look, full_caps)

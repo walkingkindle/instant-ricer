@@ -33,6 +33,9 @@ RESOURCE_SHELL_THEME = 'url("resource:///org/gnome/shell/theme/gnome-shell-dark.
 VITALS_SENSORS = {"cpu": "_processor_usage_", "ram": "_memory_usage_", "temp": "__temperature_avg__",
                   "net": "__network-rx_max__", "battery": "_battery_percentage_"}
 VITALS_SIDES = {"left": 0, "center": 1, "right": 2}
+# Settings an extension only reads when it starts. If one changes while the extension stays
+# switched on, the extension is restarted so the change shows.
+RESTART_ON_CHANGE = {VITALS_UUID: (VITALS + "hot-sensors",)}
 
 
 class ApplyError(RuntimeError):
@@ -284,6 +287,14 @@ class Engine:
         for uuid, enabled in extensions.items():
             self.backend.set_extension_enabled(uuid, enabled)
 
+    def _restart_stale(self, changed_settings, switched_extensions) -> None:
+        """Restart extensions whose start-up-only settings changed while they stayed on."""
+        for uuid, paths in RESTART_ON_CHANGE.items():
+            if (uuid not in switched_extensions and any(path in changed_settings for path in paths)
+                    and self.backend.extension_enabled(uuid)):
+                self.backend.set_extension_enabled(uuid, False)
+                self.backend.set_extension_enabled(uuid, True)
+
     def apply(self, look: Look, caps: Capabilities) -> Result:
         plan = build_plan(look, caps, self.paths)
         state = self.load_state()
@@ -324,6 +335,7 @@ class Engine:
 
         if self.paths.shell_theme_file in changed_files and USER_THEME_NAME not in changed_settings:
             self.backend.reload_shell_theme(USER_THEME_NAME)
+        self._restart_stale(changed_settings, changed_extensions)
 
         done = {"settings": done_settings, "files": done_files, "extensions": done_extensions}
         changed = sum(len(part) for part in done.values())
@@ -353,6 +365,7 @@ class Engine:
         self._restore(settings, files, extensions)
         if str(self.paths.shell_theme_file) in files:
             self.backend.reload_shell_theme(USER_THEME_NAME)
+        self._restart_stale(settings, extensions)
         state.pop("snapshot", None)
         # undoing one apply puts the look before it back in charge
         state["look"] = None if everything else snapshot.get("look")
