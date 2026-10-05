@@ -100,8 +100,9 @@ def bar_for(dials: Dials, rng) -> Bar:
     return Bar(style=style, stats=stats, stats_side=stats_side, media=media, media_side=media_side)
 
 
-def clock_and_menu(dials: Dials, on_desktop: set[str], rng) -> tuple[str, tuple[str, ...]]:
-    """What stands where the bar's clock is, and the cards in the menu that opens from it.
+def clock_and_menu(dials: Dials, on_desktop: set[str], rng) -> tuple[str, tuple[str, ...], str]:
+    """What stands where the bar's clock is, the cards in the menu that opens from it, and
+    where in that menu they go.
 
     `on_desktop` is the widget types the look draws: a clock there frees the bar to show
     something else, and a card repeats what a widget already shows less often.
@@ -122,18 +123,27 @@ def clock_and_menu(dials: Dials, on_desktop: set[str], rng) -> tuple[str, tuple[
     count = round(rng.gauss(0.6 + 3.2 * cool, 0.3 + 0.08 * (chaos - DIAL_MIN)))
     if dials.cool <= 2:
         count = 0                                            # the calm end leaves the menu alone
+    count = max(0, min(MAX_MENU_CARDS, count))
+    layout = pick(rng, {"beside": 1.0, "replace": 0.5 + 0.7 * cool, "under": 0.4 + 0.6 * ease,
+                        "first": 0.35 + 0.3 * cool}, chaos) if count else "beside"
+    # with the calendar gone, or the time gone from the bar, the menu should still tell the day
+    tells = 2.5 if layout == "replace" or clock in ("date", "weekday", "glyph") else 1.0
     weights = {
-        "profile": 1.6,
+        "clock": 0.7 * tells,
+        "profile": 1.4,
         "system": (1.2 + 0.6 * ease) * (0.5 if "system" in on_desktop else 1.0),
+        "network": 0.5 + 0.5 * (1 - warm),
+        "processes": 0.4 + 0.6 * ease,
         "progress": (0.7 + 0.3 * (1 - warm)) * (0.5 if "progress" in on_desktop else 1.0),
-        "fetch": 0.6 + 0.7 * (1 - warm),
-        "palette": 0.3 + 0.8 * cool,
+        "fetch": 0.5 + 0.6 * (1 - warm),
+        "palette": 0.3 + 0.6 * cool,
+        "power": 0.6 + 0.5 * ease,
     }
     chosen: set[str] = set()
-    for _ in range(max(0, min(MAX_MENU_CARDS, count))):
+    for _ in range(count):
         chosen.add(pick(rng, {name: weight for name, weight in weights.items()
                               if name not in chosen}, chaos))
-    return clock, tuple(name for name in MENU_SECTIONS if name in chosen)
+    return clock, tuple(name for name in MENU_SECTIONS if name in chosen), layout
 
 
 def dock_for(dials: Dials, rng) -> Dock:
@@ -355,8 +365,9 @@ def generate(dials: Dials, wallpapers: list[Wallpaper], seed: int, screen: tuple
                     fixed_zones=keep.layout is not None and keep.widgets is not None)
 
     if not keep.bar:                                         # after the widgets: it looks at them
-        clock, menu = clock_and_menu(dials, {widget.type for widget in widgets}, stream(seed, "menu"))
-        bar = replace(bar, clock=clock, menu=menu)
+        clock, menu, menu_layout = clock_and_menu(dials, {widget.type for widget in widgets},
+                                                  stream(seed, "menu"))
+        bar = replace(bar, clock=clock, menu=menu, menu_layout=menu_layout)
 
     extras = stream(seed, "extras")
     look = Look(

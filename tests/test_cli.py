@@ -326,7 +326,8 @@ def test_a_look_drives_the_bar_clock_and_menu_once_the_extension_is_loaded(app):
     assert code == 0 and bar["menu"]
     assert app.backend.extensions[RICER_UUID] is True
     assert json.loads(app.paths.shell_file.read_text())["menu"] == bar["menu"]
-    assert f"menu with {' '.join(bar['menu'])}" in run(app, "status")[1]
+    status = run(app, "status")[1]
+    assert f"menu with {' '.join(bar['menu'])}{cli.MENU_WORDS.get(bar['menu_layout'], '')}" in status
 
 
 # -- wallpapers and widgets -------------------------------------------------------------------

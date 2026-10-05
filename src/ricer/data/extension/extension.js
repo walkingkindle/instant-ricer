@@ -11,10 +11,13 @@ import St from 'gi://St';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Config from 'resource:///org/gnome/shell/misc/config.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.js';
 
 const CONFIG = GLib.build_filenamev([GLib.get_user_config_dir(), 'ricer', 'shell.json']);
 const REFRESH_SECONDS = 2;           // how often the cards update, and only while the menu is open
 const RELOAD_DELAY_MS = 150;         // a rewrite of the file arrives as several events
+const PROCESSES_EVERY = 3;           // refreshes between two looks at what is running
+const PEAK_FLOOR = 1048576;          // bytes a second that fill a network meter at the least
 const COLOUR = /^#[0-9a-fA-F]{6}$/;
 const CENTER = Clutter.ActorAlign.CENTER;
 
@@ -85,9 +88,14 @@ class Meter {
         this.actor = new St.BoxLayout({style_class: 'ricer-row'});
         this._track = new Track();
         this._value = new St.Label({style_class: 'ricer-value', y_align: CENTER});
-        this.actor.add_child(new St.Label({text: name, style_class: 'ricer-key', y_align: CENTER}));
+        this._name = new St.Label({text: name, style_class: 'ricer-key', y_align: CENTER});
+        this.actor.add_child(this._name);
         this.actor.add_child(this._track);
         this.actor.add_child(this._value);
+    }
+
+    setName(name) {
+        this._name.text = name;
     }
 
     set(fraction, text) {
@@ -141,6 +149,36 @@ function temperatureFile() {
     return readText(zone) !== null ? zone : null;
 }
 
+// The first battery's charge as a fraction, or null on a machine without one.
+function batteryFile() {
+    for (const name of ['BAT0', 'BAT1', 'BATT', 'CMB0']) {
+        const path = `/sys/class/power_supply/${name}/capacity`;
+        if (readText(path) !== null)
+            return path;
+    }
+    return null;
+}
+
+// Bytes received and sent over every interface but the loopback, since boot.
+function networkBytes() {
+    let down = 0, up = 0;
+    for (const line of (readText('/proc/net/dev') ?? '').split('\n').slice(2)) {
+        const [name, rest] = line.split(':');
+        if (!rest || name.trim() === 'lo')
+            continue;
+        const fields = rest.trim().split(/\s+/).map(Number);
+        down += fields[0] || 0;
+        up += fields[8] || 0;
+    }
+    return {down, up, time: GLib.get_monotonic_time()};
+}
+
+function rate(bytes) {
+    if (bytes >= 1048576)
+        return `${(bytes / 1048576).toFixed(1)}M`;
+    return bytes >= 1024 ? `${Math.round(bytes / 1024)}K` : `${Math.round(bytes)}B`;
+}
+
 function uptime() {
     const seconds = parseFloat(readText('/proc/uptime') ?? '');
     if (!Number.isFinite(seconds))
@@ -190,7 +228,8 @@ function systemCard(config, state) {
     const box = card(config, 'System');
     const cpu = new Meter('CPU'), ram = new Meter('Memory'), drive = new Meter('Disk');
     const heat = state.temperature ? new Meter('Temp') : null;
-    for (const meter of [cpu, ram, heat, drive]) {
+    const charge = state.battery ? new Meter('Battery') : null;
+    for (const meter of [cpu, ram, heat, drive, charge]) {
         if (meter)
             box.add_child(meter.actor);
     }
@@ -210,6 +249,9 @@ function systemCard(config, state) {
         const degrees = heat ? parseInt(readText(state.temperature) ?? '') / 1000 : NaN;
         if (Number.isFinite(degrees))
             heat.set(degrees / 100, `${Math.round(degrees)}°`);
+        const charged = charge ? parseInt(readText(state.battery) ?? '') / 100 : NaN;
+        if (Number.isFinite(charged))
+            charge.set(charged, percent(charged));
     };
     return {actor: box, update};
 }
@@ -273,15 +315,130 @@ function paletteCard(config) {
     return {actor: box, update: null};
 }
 
+function clockCard(config) {
+    const box = card(config, null);
+    const time = new St.Label({style_class: 'ricer-bigtime'});
+    const date = new St.Label({style_class: 'ricer-dim'});
+    box.add_child(time);
+    box.add_child(date);
+    const format = typeof config.time_format === 'string' ? config.time_format : '%H:%M';
+    const update = () => {
+        const now = GLib.DateTime.new_now_local();
+        time.text = (now.format(format) ?? '').trim();
+        date.text = now.format('%A, %-d %B') ?? '';
+    };
+    return {actor: box, update};
+}
+
+function networkCard(config, state) {
+    const box = card(config, 'Network');
+    const down = new Meter('Down'), up = new Meter('Up');
+    box.add_child(down.actor);
+    box.add_child(up.actor);
+    let peak = PEAK_FLOOR;
+    const update = () => {
+        const now = networkBytes(), before = state.network;
+        state.network = now;
+        const seconds = before ? (now.time - before.time) / 1e6 : 0;
+        if (seconds <= 0)
+            return;
+        const received = Math.max(0, now.down - before.down) / seconds;
+        const sent = Math.max(0, now.up - before.up) / seconds;
+        peak = Math.max(peak, received, sent);
+        down.set(received / peak, rate(received));
+        up.set(sent / peak, rate(sent));
+    };
+    return {actor: box, update};
+}
+
+// What uses the most memory, with the processes of one program counted together.
+function processesCard(config, state) {
+    const box = card(config, 'Most memory');
+    const meters = [];
+    for (let index = 0; index < 4; index++) {
+        const meter = new Meter('');
+        meter.actor.add_style_class_name('ricer-process');
+        meters.push(meter);
+        box.add_child(meter.actor);
+    }
+    let turn = 0;
+    const show = text => {
+        const total = memory()?.total ?? 0, used = new Map();
+        for (const line of text.split('\n')) {
+            const match = /^\s*(\d+)\s+(.+)$/.exec(line);
+            if (match)
+                used.set(match[2], (used.get(match[2]) ?? 0) + Number(match[1]));
+        }
+        const top = [...used.entries()].sort((a, b) => b[1] - a[1]).slice(0, meters.length);
+        meters.forEach((meter, index) => {
+            const [name, kb] = top[index] ?? ['', 0];
+            meter.setName(name);
+            meter.set(total ? kb / total : 0, kb ? `${(kb / 1048576).toFixed(1)}G` : '');
+        });
+    };
+    const update = () => {
+        if (turn++ % PROCESSES_EVERY)
+            return;
+        try {
+            const ps = Gio.Subprocess.new(['ps', '-eo', 'rss=,comm='],
+                Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE);
+            ps.communicate_utf8_async(null, null, (_ps, result) => {
+                try {
+                    const [, text] = ps.communicate_utf8_finish(result);
+                    if (state.alive && text)
+                        show(text);
+                } catch {
+                    // no reading this time
+                }
+            });
+        } catch {
+            // no ps on this machine: the card stays empty
+        }
+    };
+    return {actor: box, update};
+}
+
+function powerCard(config, _state, close) {
+    const box = card(config, null);
+    const row = new St.BoxLayout({style_class: 'ricer-actions', x_align: CENTER, x_expand: true});
+    const actions = SystemActions.getDefault();
+    const buttons = [
+        ['system-lock-screen-symbolic', 'Lock', 'canLockScreen', () => actions.activateLockScreen()],
+        ['weather-clear-night-symbolic', 'Suspend', 'canSuspend', () => actions.activateSuspend()],
+        ['system-log-out-symbolic', 'Log out', 'canLogout', () => actions.activateLogout()],
+        ['system-reboot-symbolic', 'Restart', 'canRestart', () => actions.activateRestart()],
+        ['system-shutdown-symbolic', 'Power off', 'canPowerOff', () => actions.activatePowerOff()],
+    ];
+    for (const [icon, name, allowed, run] of buttons) {
+        if (!actions[allowed])
+            continue;
+        const button = new St.Button({
+            style_class: 'ricer-action', can_focus: true, accessible_name: name,
+            child: new St.Icon({icon_name: icon}),
+        });
+        button.connect('clicked', () => {
+            close();
+            run();
+        });
+        row.add_child(button);
+    }
+    box.add_child(row);
+    return {actor: box, update: null};
+}
+
 const CARDS = {
-    profile: profileCard, system: systemCard, progress: progressCard, fetch: fetchCard,
-    palette: paletteCard,
+    clock: clockCard, profile: profileCard, system: systemCard, network: networkCard,
+    processes: processesCard, progress: progressCard, fetch: fetchCard, palette: paletteCard,
+    power: powerCard,
 };
 
 export default class RicerExtension extends Extension {
     enable() {
         this._dateMenu = Main.panel.statusArea.dateMenu ?? null;
-        this._state = {cpu: cpuTimes(), temperature: temperatureFile()};
+        this._state = {
+            cpu: cpuTimes(), temperature: temperatureFile(), battery: batteryFile(),
+            network: networkBytes(), alive: true,
+        };
         this._monitor = Gio.File.new_for_path(CONFIG).monitor_file(Gio.FileMonitorFlags.NONE, null);
         this._monitorId = this._monitor.connect('changed', () => this._reloadSoon());
         this._apply();
@@ -296,6 +453,7 @@ export default class RicerExtension extends Extension {
         this._monitor = this._monitorId = null;
         this._clearClock();
         this._clearMenu();
+        this._state.alive = false;                           // for a reading still on its way
         this._dateMenu = this._state = null;
     }
 
@@ -372,22 +530,38 @@ export default class RicerExtension extends Extension {
 
     _setMenu(config) {
         const names = (Array.isArray(config.menu) ? config.menu : []).filter(name => name in CARDS);
-        const area = this._dateMenu._calendar?.get_parent()?.get_parent();
+        const calendarColumn = this._dateMenu._calendar?.get_parent();
+        const area = calendarColumn?.get_parent();
         if (!names.length || !area)
             return;
+        const menu = this._dateMenu.menu;
+        const layout = config.layout;
         this._column = new St.BoxLayout({
-            vertical: true, style_class: 'ricer-dash', y_align: Clutter.ActorAlign.START,
+            vertical: true, y_align: Clutter.ActorAlign.START,
+            style_class: layout === 'under' ? 'ricer-dash-under' : 'ricer-dash',
         });
         this._updates = [];
         for (const name of names) {
-            const {actor, update} = CARDS[name](config, this._state);
+            const {actor, update} = CARDS[name](config, this._state, () => menu.close());
             this._column.add_child(actor);
             if (update)
                 this._updates.push(update);
         }
-        area.add_child(this._column);
+        // where the cards go, and which of GNOME's own parts make room for them
+        const displays = this._dateMenu._displaysSection;
+        if (layout === 'replace') {
+            this._hide(calendarColumn);
+            area.add_child(this._column);
+        } else if (layout === 'under' && displays) {
+            this._hide(displays);
+            calendarColumn.add_child(this._column);
+        } else if (layout === 'first') {
+            this._column.add_style_class_name('ricer-dash-first');
+            area.insert_child_at_index(this._column, 0);
+        } else {
+            area.add_child(this._column);
+        }
 
-        const menu = this._dateMenu.menu;
         this._menu = menu;
         this._openId = menu.connect('open-state-changed', (_menu, open) => {
             if (open)
@@ -397,6 +571,13 @@ export default class RicerExtension extends Extension {
         });
         if (menu.isOpen)
             this._startUpdates();
+    }
+
+    _hide(actor) {
+        if (actor.visible) {
+            actor.hide();
+            this._hidden.push(actor);
+        }
     }
 
     _startUpdates() {
@@ -423,5 +604,7 @@ export default class RicerExtension extends Extension {
         this._column?.destroy();
         this._column = null;
         this._updates = [];
+        (this._hidden ?? []).forEach(actor => actor.show());
+        this._hidden = [];
     }
 }

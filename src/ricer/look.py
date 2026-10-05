@@ -18,7 +18,11 @@ BAR_STATS = ("cpu", "ram", "temp", "net", "battery")
 # what the bar shows where the clock is: "full" is GNOME's own date and time, "glyph" an icon
 BAR_CLOCKS = ("full", "time", "date", "weekday", "glyph")
 # cards ricer can add to the menu that opens from the clock
-MENU_SECTIONS = ("profile", "system", "progress", "fetch", "palette")
+MENU_SECTIONS = ("clock", "profile", "system", "network", "processes", "progress", "fetch", "palette",
+                 "power")
+# where those cards go: beside GNOME's calendar, in the calendar's place, under the calendar
+# in place of its events and world clocks, or ahead of the notifications
+MENU_LAYOUTS = ("beside", "replace", "under", "first")
 DOCK_POSITIONS = ("BOTTOM", "LEFT", "RIGHT")
 DOCK_INDICATORS = ("DOTS", "SQUARES", "DASHES", "SEGMENTED", "SOLID", "CILIORA", "METRO")
 BORDERS = ("none", "hairline", "accent")
@@ -128,10 +132,12 @@ class Bar:
     media_side: str = "left"
     clock: str = "full"              # what stands where the clock is
     menu: tuple[str, ...] = ()       # cards added to the menu that opens from the clock
+    menu_layout: str = "beside"      # where they go, and what of GNOME's they displace
 
     def validate(self) -> None:
         _one_of("bar.style", self.style, BAR_STYLES)
         _one_of("bar.clock", self.clock, BAR_CLOCKS)
+        _one_of("bar.menu_layout", self.menu_layout, MENU_LAYOUTS)
         _require(all(s in MENU_SECTIONS for s in self.menu) and len(set(self.menu)) == len(self.menu),
                  f"bar.menu must be distinct members of {MENU_SECTIONS}, got {self.menu!r}")
         _require(all(s in BAR_STATS for s in self.stats) and len(set(self.stats)) == len(self.stats),

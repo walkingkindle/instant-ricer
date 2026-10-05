@@ -8,7 +8,7 @@ from ricer import generator, metrics
 from ricer.chance import stream
 from ricer.generator import (Kept, bar_for, clock_and_menu, dock_for, generate, kept_from, layout_for, style_for,
                              widget_budget, widget_set)
-from ricer.look import ANCHORS, MENU_SECTIONS, Bar, Dials, LookError
+from ricer.look import ANCHORS, MENU_LAYOUTS, MENU_SECTIONS, Bar, Dials, LookError
 from ricer.palette import hue_of, hue_warmth
 from ricer.wallpapers import NoWallpapersError
 
@@ -193,18 +193,18 @@ def test_bar_groups_prefer_opposite_sides():
 
 def clocks_and_menus(on_desktop=frozenset(), **dials):
     found = [clock_and_menu(Dials(**dials), set(on_desktop), stream(seed, "menu")) for seed in SEEDS]
-    return [clock for clock, _ in found], [menu for _, menu in found]
+    return [found[0] for found in found], [found[1] for found in found], [found[2] for found in found]
 
 
 def test_the_bar_gives_up_the_time_only_when_the_desktop_shows_it():
     timeless = ("date", "weekday", "glyph")
-    alone, _ = clocks_and_menus()
-    beside, _ = clocks_and_menus({"clock"})
+    alone = clocks_and_menus()[0]
+    beside = clocks_and_menus({"clock"})[0]
     assert sum(share(alone, form) for form in timeless) == 0     # the time has to be somewhere
     assert sum(share(beside, form) for form in timeless) > 0.4
     assert {"full", "time", "date", "weekday", "glyph"} == set(beside)
     # windows cover the desktop: a look built for use keeps the time in the bar
-    usable, _ = clocks_and_menus({"clock"}, ease=10)
+    usable = clocks_and_menus({"clock"}, ease=10)[0]
     assert sum(share(usable, form) for form in timeless) == 0
 
 
@@ -227,12 +227,37 @@ def test_a_card_repeats_a_desktop_widget_less_often():
     assert with_system({"system"}) < with_system(set()) - 0.1
 
 
+def test_the_inside_of_the_menu_is_laid_out_differently_from_look_to_look():
+    _, menus, layouts = clocks_and_menus(cool=7)
+    assert set(layouts) == set(MENU_LAYOUTS)
+    assert all(share(layouts, layout) > 0.08 for layout in MENU_LAYOUTS)
+    _, menus, layouts = clocks_and_menus(cool=3, chaos=10)
+    assert all(layout == "beside" for menu, layout in zip(menus, layouts) if not menu)
+
+
+def test_a_menu_that_loses_its_calendar_or_a_bar_that_loses_the_time_gets_a_clock_card_more_often():
+    _, menus, layouts = clocks_and_menus(cool=6)
+    def with_clock(wanted):
+        return share(["clock" in menu for menu, layout in zip(menus, layouts) if wanted(layout)], True)
+
+    assert with_clock(lambda layout: layout == "replace") > with_clock(lambda layout: layout != "replace") + 0.1
+    clocks, menus, layouts = clocks_and_menus({"clock"}, cool=6, ease=2)
+    kept = [layout != "replace" for layout in layouts]
+    timeless = share(["clock" in menu for clock, menu, keep in zip(clocks, menus, kept)
+                      if keep and clock in ("date", "weekday", "glyph")], True)
+    timed = share(["clock" in menu for clock, menu, keep in zip(clocks, menus, kept)
+                   if keep and clock in ("full", "time")], True)
+    assert timeless > timed + 0.1
+
+
 def test_the_clock_and_menu_have_their_own_stream(wallpaper_set):
     look = generate(Dials(8, 4, 5), wallpaper_set, 12)
     widgets = {widget.type for widget in look.widgets}
-    assert (look.bar.clock, look.bar.menu) == clock_and_menu(look.dials, widgets, stream(12, "menu"))
+    assert (look.bar.clock, look.bar.menu, look.bar.menu_layout) == clock_and_menu(
+        look.dials, widgets, stream(12, "menu"))
     # the rest of the bar is what its own stage drew, as it was before there was a choice
-    assert dataclasses.replace(look.bar, clock="full", menu=()) == bar_for(look.dials, stream(12, "bar"))
+    assert dataclasses.replace(look.bar, clock="full", menu=(), menu_layout="beside") == bar_for(
+        look.dials, stream(12, "bar"))
 
 
 def test_cool_and_ease_pick_the_bar_style():

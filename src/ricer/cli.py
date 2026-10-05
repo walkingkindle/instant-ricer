@@ -21,6 +21,8 @@ from ricer.wallpapers import Library, NoWallpapersError
 
 DEFAULT_DIAL = 5
 DEFAULT_FETCH = 12
+MENU_WORDS = {"replace": " for a calendar", "under": " under the calendar",
+              "first": " ahead of the notifications"}
 # how `status` and each new look word what stands where the bar's clock is
 CLOCK_WORDS = {"time": "the time only", "date": "the date for a clock", "weekday": "the weekday for a clock",
                "glyph": "an icon for a clock"}
@@ -259,7 +261,7 @@ def _bar_line(look: Look) -> str:
     if bar.clock in CLOCK_WORDS:
         parts.append(CLOCK_WORDS[bar.clock])
     if bar.menu:
-        parts.append(f"menu with {' '.join(bar.menu)}")
+        parts.append(f"menu with {' '.join(bar.menu)}{MENU_WORDS.get(bar.menu_layout, '')}")
     return ", ".join(parts)
 
 

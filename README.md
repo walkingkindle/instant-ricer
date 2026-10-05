@@ -123,9 +123,11 @@ one on screen. Ricer switches Vitals and Media Controls on and off per look.
 
 Ricer also ships a small extension of its own. The menu that opens from the bar's clock
 takes each look's colours without it; with it, a look can put the date, the weekday or an
-icon where the clock is (only when the desktop has a clock of its own) and add cards beside
-the calendar: who is logged in, system readings, how far the day and year have gone, a
-summary of the machine, the look's colours. `ricer setup` copies it into place, and GNOME
+icon where the clock is (only when the desktop has a clock of its own) and rebuild the
+inside of that menu: up to four cards (a large clock, who is logged in, system readings,
+network speed, the programs using the most memory, how far the day and year have gone, a
+summary of the machine, the look's colours, power buttons) placed beside the calendar, in
+its place, under it, or ahead of the notifications. `ricer setup` copies it into place, and GNOME
 loads it at the next login (on X11: Alt+F2, `r`, Enter).
 
 ## Install

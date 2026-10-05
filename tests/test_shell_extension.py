@@ -7,7 +7,7 @@ import pytest
 from ricer import shell_extension
 from ricer.capabilities import RICER_UUID
 from ricer.generator import generate
-from ricer.look import BAR_CLOCKS, MENU_SECTIONS, Bar, Dials
+from ricer.look import BAR_CLOCKS, MENU_LAYOUTS, MENU_SECTIONS, Bar, Dials
 
 
 @pytest.fixture
@@ -31,6 +31,8 @@ def test_the_extension_knows_every_card_and_clock_a_look_can_ask_for():
     assert "'full'" in script and "'glyph'" in script       # the two it handles by name
     for form in BAR_CLOCKS:                                  # the others arrive as a format
         assert (shell_extension.clock_format(form, True) is None) == (form in ("full", "glyph"))
+    for layout in MENU_LAYOUTS:                              # "beside" is what it does otherwise
+        assert (f"'{layout}'" in script) == (layout != "beside")
     # it reads the file ricer writes
     assert "'ricer', 'shell.json'" in script
 
@@ -46,10 +48,11 @@ def test_install_copies_the_files_once_and_again_only_when_they_differ(paths):
 
 
 def test_config_says_what_the_look_wants(look, full_caps):
-    bar = Bar(style="island", clock="date", menu=("profile", "system"))
+    bar = Bar(style="island", clock="date", menu=("profile", "system"), menu_layout="replace")
     config = shell_extension.config(dataclasses.replace(look, bar=bar), full_caps)
     assert config["clock"] == {"form": "date", "format": "%a %-d %b"}
-    assert config["menu"] == ["profile", "system"]
+    assert config["menu"] == ["profile", "system"] and config["layout"] == "replace"
+    assert config["time_format"] == "%H:%M"                  # for the clock card, whatever the bar shows
     assert config["palette"][0] == look.palette.accent and len(config["palette"]) == 5
     assert config["seed"] == look.seed and config["caps"] == look.style.caps
     json.dumps(config)

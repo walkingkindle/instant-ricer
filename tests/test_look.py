@@ -29,9 +29,10 @@ def test_look_survives_a_json_round_trip(wallpaper_set):
 def test_a_look_saved_before_the_bar_had_a_clock_choice_still_reads(wallpaper_set):
     look = generate(Dials(8, 6, 7, 6), wallpaper_set, 4)
     old = json.loads(json.dumps(look.to_dict()))
-    del old["bar"]["clock"], old["bar"]["menu"]
+    del old["bar"]["clock"], old["bar"]["menu"], old["bar"]["menu_layout"]
     read = Look.from_dict(old)
-    assert read.bar == dataclasses.replace(look.bar, clock="full", menu=())    # GNOME's own, untouched
+    assert read.bar == dataclasses.replace(look.bar, clock="full", menu=(),
+                                           menu_layout="beside")           # GNOME's own, untouched
     read.validate()
 
 
@@ -60,6 +61,7 @@ def test_bad_pieces_are_rejected(wallpaper_set):
         dataclasses.replace(look, bar=Bar(clock="sundial")),
         dataclasses.replace(look, bar=Bar(menu=("profile", "profile"))),
         dataclasses.replace(look, bar=Bar(menu=("horoscope",))),
+        dataclasses.replace(look, bar=Bar(menu_layout="sideways")),
         dataclasses.replace(look, dock=Dock(opacity=1.5)),
         dataclasses.replace(look, dock=Dock(indicator="LASERS")),
         dataclasses.replace(look, style=Style(border="dotted")),

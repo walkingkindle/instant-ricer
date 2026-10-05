@@ -3,6 +3,9 @@
 .ricer-dash { width: 21em; spacing: 2px; }
 .ricer-dash:ltr { margin-left: 6px; }
 .ricer-dash:rtl { margin-right: 6px; }
+.ricer-dash.ricer-dash-first:ltr { margin-left: 0; margin-right: 6px; }
+.ricer-dash.ricer-dash-first:rtl { margin-right: 0; margin-left: 6px; }
+.ricer-dash-under { spacing: 2px; }
 
 .ricer-card {
   border-radius: 9px;
@@ -38,3 +41,11 @@
 .ricer-swatch { width: 1.7em; height: 1.7em; border-radius: 999px; border: 1px solid rgba(128, 128, 128, 0.4); }
 
 #panel .clock-display .ricer-clock-glyph { icon-size: 1.091em; }
+
+.ricer-bigtime { font-size: 2.8em; font-weight: 300; font-feature-settings: "tnum"; }
+.ricer-process .ricer-key { width: 6.4em; }
+.ricer-actions { spacing: 0.7em; }
+.ricer-action { padding: 0.75em; border-radius: 999px; background-color: rgba(128, 128, 128, 0.2); }
+.ricer-action:hover, .ricer-action:focus { background-color: rgba(128, 128, 128, 0.35); }
+.ricer-action:active { background-color: rgba(128, 128, 128, 0.5); }
+.ricer-action StIcon { icon-size: 1.25em; }

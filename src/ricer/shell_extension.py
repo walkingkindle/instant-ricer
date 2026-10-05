@@ -47,6 +47,8 @@ def config(look: Look, caps: Capabilities) -> dict:
     return {
         "clock": {"form": look.bar.clock, "format": clock_format(look.bar.clock, caps.clock_24h)},
         "menu": list(look.bar.menu),
+        "layout": look.bar.menu_layout,
+        "time_format": clock_format("time", caps.clock_24h),
         "caps": look.style.caps,
         "palette": [palette.accent, palette.accent2, palette.text, palette.card, palette.hot],
         "seed": look.seed,
