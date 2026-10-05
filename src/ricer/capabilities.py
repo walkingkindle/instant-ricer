@@ -14,6 +14,7 @@ USER_THEME_UUID = "user-theme@gnome-shell-extensions.gcampax.github.com"
 BLUR_UUID = "blur-my-shell@aunetx"
 VITALS_UUID = "Vitals@CoreCoding.com"
 MEDIA_CONTROLS_UUID = "mediacontrols@cliffniff.github.com"
+RICER_UUID = "ricer@walkingkindle.github.io"                 # ricer's own extension, shipped with it
 # optional extensions `ricer setup` offers, with what each one unlocks
 OPTIONAL_EXTENSIONS = {
     USER_THEME_UUID: ("User Themes", "styling the top bar"),
@@ -60,6 +61,8 @@ class Capabilities:
     extensions_allowed: bool = True           # False when GNOME has user extensions switched off
     gtk3_themes: dict[str, str] = field(default_factory=dict)    # stock app theme -> its gtk-3.0 folder
     terminal_glass: bool = False              # this GNOME Terminal can have a see-through background
+    shell_extension: bool = False             # ricer's own extension is there and GNOME has loaded it
+    shell_extension_waiting: bool = False     # its files are there; GNOME loads them at the next login
 
     @property
     def window_colours(self) -> bool:
@@ -85,6 +88,10 @@ class Capabilities:
             ("Stats in the top bar", self.vitals, "" if self.vitals else need(VITALS_UUID)),
             ("Now playing in the top bar", self.media_controls,
              "" if self.media_controls else need(MEDIA_CONTROLS_UUID)),
+            ("Bar clock and its menu", self.shell_extension,
+             "" if self.shell_extension else
+             "ricer's extension is installed: log out and back in to load it"
+             if self.shell_extension_waiting else "install ricer's own extension: ricer setup"),
             ("Blur", self.blur, "" if self.blur else need(BLUR_UUID)),
             ("Dock styling", self.dock, "" if self.dock else "Dash to Dock / Ubuntu Dock not found"),
             ("Terminal colours", self.terminal_profile is not None,
@@ -156,6 +163,10 @@ def detect(backend, paths: Paths, env=None, system_data_dirs=SYSTEM_DATA_DIRS,
     installed = _subdirs([*(d / "gnome-shell/extensions" for d in data_dirs),
                           paths.data / "gnome-shell/extensions"])
 
+    # GNOME Shell only finds a new extension folder when it starts
+    own = allowed and RICER_UUID in installed
+    loaded = own and backend.extension_installed(RICER_UUID)
+
     shell_themes = {}
     for directory in data_dirs:
         for css in sorted((directory / "gnome-shell/theme").glob("*/gnome-shell.css")):
@@ -196,4 +207,6 @@ def detect(backend, paths: Paths, env=None, system_data_dirs=SYSTEM_DATA_DIRS,
         extensions_allowed=allowed,
         gtk3_themes=gtk3_themes,
         terminal_glass=backend.has_key(TERMINAL_PROFILE_SCHEMA, "background-transparency-percent"),
+        shell_extension=loaded,
+        shell_extension_waiting=own and not loaded,
     )

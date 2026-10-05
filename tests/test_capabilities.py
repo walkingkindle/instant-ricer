@@ -1,6 +1,7 @@
 from ricer.backends import FakeBackend
 from ricer.capabilities import (BLUR_UUID, DESKTOP_ICONS_SCHEMA, DOCK_SCHEMA, MEDIA_CONTROLS_UUID,
-                                TERMINAL_PROFILE_SCHEMA, TERMINAL_SCHEMA, USER_THEME_UUID, VITALS_UUID,
+                                RICER_UUID, TERMINAL_PROFILE_SCHEMA, TERMINAL_SCHEMA, USER_THEME_UUID,
+                                VITALS_UUID,
                                 detect, font_voices)
 from ricer.look import VOICES
 
@@ -53,7 +54,7 @@ def test_detects_an_ubuntu_like_desktop(paths, tmp_path):
     assert caps.font_for("serif") == "Noto Serif"
     assert "ubuntu-dock@ubuntu.com" in caps.installed and caps.extensions_allowed
     missing = [feature for feature, available, _ in caps.report() if not available]
-    assert missing == ["Now playing in the top bar"]
+    assert missing == ["Now playing in the top bar", "Bar clock and its menu"]
 
 
 def test_detects_a_bare_desktop_without_crashing(paths, tmp_path):
@@ -78,6 +79,30 @@ def test_the_global_extensions_switch_blocks_everything(paths, tmp_path):
     assert not caps.extensions_allowed and caps.session == "unknown"
     assert not (caps.user_theme or caps.blur or caps.vitals or caps.media_controls)
     assert VITALS_UUID in caps.installed                     # still known to be there
+
+
+def test_ricers_extension_counts_only_once_gnome_has_loaded_it(paths, tmp_path):
+    def caps(backend):
+        return detect(backend, paths, {}, system_data_dirs=[tmp_path], fonts=NO_FONTS, screen=(1, 1))
+
+    def note(found):
+        return next(note for feature, _, note in found.report() if feature == "Bar clock and its menu")
+
+    absent = caps(FakeBackend())
+    assert not absent.shell_extension and not absent.shell_extension_waiting
+    assert "ricer setup" in note(absent)
+
+    (paths.extensions_dir / RICER_UUID).mkdir(parents=True)  # copied in; the shell has not restarted
+    waiting = caps(FakeBackend())
+    assert not waiting.shell_extension and waiting.shell_extension_waiting
+    assert "log out and back in" in note(waiting)
+
+    loaded = caps(FakeBackend(extensions={RICER_UUID: False}))  # known to the shell, on or off
+    assert loaded.shell_extension and not loaded.shell_extension_waiting and note(loaded) == ""
+
+    off = caps(FakeBackend(extensions={RICER_UUID: True},
+                           effective={(SHELL, "disable-user-extensions"): True}))
+    assert not off.shell_extension and not off.shell_extension_waiting
 
 
 def test_twelve_hour_clock_and_accent_setting_are_noticed(paths, tmp_path):

@@ -72,3 +72,39 @@ def test_text_and_bar_grow_with_the_scale(look):
     assert "font-size: 13.8pt" in large and "height: 55px" in large
     assert "height: 34px" in render(look, "solid", scale=1.0)
     assert "height: 34px" in render(look, "island", scale=1.0)   # 44 less its own margins
+
+
+def test_the_menu_under_the_clock_takes_the_look(look):
+    css = render(look, "island", radius=16, border="hairline")
+    text = shell_theme._rgb_triplet(look.palette.text)
+    accent = shell_theme._rgb_triplet(look.palette.accent)
+    cards = css.split(".message, .events-button, .world-clocks-button, .weather-button {")[1].split("}")[0]
+    assert f"background-color: rgba({text}, 0.06);" in cards and "border-radius: 12px;" in cards
+    assert "border: 1px solid rgba(255, 255, 255, 0.10);" in cards
+    assert f".datemenu-today-button .day-label {{ color: {look.palette.accent}; }}" in css
+    assert f"box-shadow: inset 0 0 0 2px {look.palette.accent} !important;" in css   # not the stock orange
+    assert f".calendar .calendar-day.calendar-weekend {{ color: rgba({text}, 0.6); }}" in css
+    assert f".message-list {{ border-color: rgba({text}, 0.12); }}" in css
+    assert f"background-color: rgba({accent}, 0.14);" in css
+    for bar in shell_theme.STYLED:                           # every styled bar, not just this one
+        assert ".message-list .message-list-placeholder" in render(look, bar)
+
+
+def test_cards_in_a_menu_are_a_step_tighter_than_the_menu(look):
+    assert "border-radius: 3px;" in render(look, radius=0)
+    assert "border-radius: 16px;" in render(look, radius=40)
+
+
+def test_ricers_own_cards_are_coloured_by_rules_that_outrank_the_extensions(look):
+    css = render(look, gradient=True)
+    fill = css.split("#calendarArea .ricer-fill {")[1].split("}")[0]
+    assert f"background-gradient-start: {look.palette.accent};" in fill
+    assert f"background-gradient-end: {look.palette.accent2};" in fill
+    assert "#calendarArea .ricer-card {" in css and "#calendarArea .ricer-avatar {" in css
+    assert f"#panel .clock-display .ricer-clock-glyph {{ color: {look.palette.accent}; }}" in css
+    # every class the theme colours is one the extension really uses
+    import re
+    from ricer import shell_extension
+    script = shell_extension.bundled()["extension.js"]
+    for name in set(re.findall(r"\.(ricer-[a-z-]+)", css)):
+        assert name in script, name

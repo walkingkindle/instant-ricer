@@ -110,6 +110,7 @@ what it skipped. `ricer status` lists it.
 | Top bar styling | [User Themes](https://extensions.gnome.org/extension/19/user-themes/) |
 | Stats in the top bar | [Vitals](https://extensions.gnome.org/extension/1460/vitals/) |
 | Player in the top bar | [Media Controls](https://extensions.gnome.org/extension/4470/media-controls/) |
+| The bar's clock and cards in its menu | ricer's own extension, on GNOME 46 (`ricer setup` copies it in) |
 | Blur | [Blur my Shell](https://extensions.gnome.org/extension/3193/blur-my-shell/) |
 | Dock styling | Ubuntu Dock or [Dash to Dock](https://extensions.gnome.org/extension/307/dash-to-dock/) |
 | Terminal colours | GNOME Terminal (see-through where its build supports that, as on Ubuntu) |
@@ -119,6 +120,13 @@ what it skipped. `ricer status` lists it.
 
 `ricer setup` installs the missing extensions through GNOME's own dialog: you confirm each
 one on screen. Ricer switches Vitals and Media Controls on and off per look.
+
+Ricer also ships a small extension of its own. The menu that opens from the bar's clock
+takes each look's colours without it; with it, a look can put the date, the weekday or an
+icon where the clock is (only when the desktop has a clock of its own) and add cards beside
+the calendar: who is logged in, system readings, how far the day and year have gone, a
+summary of the machine, the look's colours. `ricer setup` copies it into place, and GNOME
+loads it at the next login (on X11: Alt+F2, `r`, Enter).
 
 ## Install
 
@@ -204,6 +212,7 @@ Ricer only writes settings it owns, and records the previous value of each first
 - the dock's position, auto-hide, size, opacity, indicator and tint
 - the top bar, through a generated shell theme at `~/.local/share/themes/Ricer`
 - Vitals and Media Controls: their settings, and whether each is switched on
+- its own extension: whether it is switched on, and `~/.config/ricer/shell.json`, which it reads
 - Blur my Shell's blur switches
 - the desktop-icon extension's Home and drive icons
 - the default GNOME Terminal profile's colours and transparency

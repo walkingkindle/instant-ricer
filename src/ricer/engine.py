@@ -8,9 +8,9 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ricer import gtk_theme, placement, shell_theme
+from ricer import gtk_theme, placement, shell_extension, shell_theme
 from ricer.backends import gv, gv_uint
-from ricer.capabilities import MEDIA_CONTROLS_UUID, VITALS_UUID, Capabilities
+from ricer.capabilities import MEDIA_CONTROLS_UUID, RICER_UUID, VITALS_UUID, Capabilities
 from ricer.compose import remember
 from ricer.look import Look, LookError
 from ricer.palette import GNOME_ACCENT_NAMES, YARU_ACCENT_HUES, hue_distance, terminal_transparency
@@ -188,6 +188,17 @@ def _bar(look: Look, caps: Capabilities, plan: Plan, paths: Paths, yaru: str) ->
             settings[MEDIA + "show-control-icons-seek-forward"] = gv(False)
     elif bar.media:
         notices.append("No player in the top bar: it needs the 'Media Controls' extension (ricer setup).")
+
+    if caps.shell_extension:
+        # always on: with nothing to draw it leaves the bar as GNOME has it
+        plan.files[paths.shell_file] = json.dumps(shell_extension.config(look, caps), indent=2) + "\n"
+        plan.extensions[RICER_UUID] = True
+    elif bar.clock != "full" or bar.menu:
+        notices.append(
+            "The bar keeps GNOME's clock and menu: ricer's extension is installed, and GNOME "
+            "loads it when you next log in." if caps.shell_extension_waiting else
+            "The bar keeps GNOME's clock and menu: changing them needs ricer's own extension "
+            "(ricer setup).")
 
 
 def _transparency(look: Look) -> int:

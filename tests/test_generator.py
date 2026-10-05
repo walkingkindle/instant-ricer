@@ -6,9 +6,9 @@ import pytest
 
 from ricer import generator, metrics
 from ricer.chance import stream
-from ricer.generator import (Kept, bar_for, dock_for, generate, kept_from, layout_for, style_for,
+from ricer.generator import (Kept, bar_for, clock_and_menu, dock_for, generate, kept_from, layout_for, style_for,
                              widget_budget, widget_set)
-from ricer.look import ANCHORS, Bar, Dials, LookError
+from ricer.look import ANCHORS, MENU_SECTIONS, Bar, Dials, LookError
 from ricer.palette import hue_of, hue_warmth
 from ricer.wallpapers import NoWallpapersError
 
@@ -189,6 +189,50 @@ def test_bar_groups_prefer_opposite_sides():
     bars = [bar for bar in over_seeds(bar_for, Dials(ease=9), "bar") if bar.stats and bar.media]
     assert share([bar.stats_side == bar.media_side for bar in bars], True) < 0.3
     assert {bar.stats_side for bar in bars} == {"left", "right"}
+
+
+def clocks_and_menus(on_desktop=frozenset(), **dials):
+    found = [clock_and_menu(Dials(**dials), set(on_desktop), stream(seed, "menu")) for seed in SEEDS]
+    return [clock for clock, _ in found], [menu for _, menu in found]
+
+
+def test_the_bar_gives_up_the_time_only_when_the_desktop_shows_it():
+    timeless = ("date", "weekday", "glyph")
+    alone, _ = clocks_and_menus()
+    beside, _ = clocks_and_menus({"clock"})
+    assert sum(share(alone, form) for form in timeless) == 0     # the time has to be somewhere
+    assert sum(share(beside, form) for form in timeless) > 0.4
+    assert {"full", "time", "date", "weekday", "glyph"} == set(beside)
+    # windows cover the desktop: a look built for use keeps the time in the bar
+    usable, _ = clocks_and_menus({"clock"}, ease=10)
+    assert sum(share(usable, form) for form in timeless) == 0
+
+
+def test_cool_fills_the_menu_and_the_calm_end_leaves_it_alone():
+    def sizes(cool):
+        return [len(menu) for menu in clocks_and_menus(cool=cool)[1]]
+
+    assert max(sizes(1)) == 0 and max(sizes(2)) == 0
+    assert statistics.mean(sizes(4)) < statistics.mean(sizes(7)) < statistics.mean(sizes(10))
+    assert statistics.mean(sizes(10)) > 3 and max(sizes(10)) == generator.MAX_MENU_CARDS
+    menus = clocks_and_menus(cool=7)[1]
+    assert {name for menu in menus for name in menu} == set(MENU_SECTIONS)
+    assert all(list(menu) == [name for name in MENU_SECTIONS if name in menu] for menu in menus)
+
+
+def test_a_card_repeats_a_desktop_widget_less_often():
+    def with_system(on_desktop):
+        return share(["system" in menu for menu in clocks_and_menus(on_desktop, cool=5)[1]], True)
+
+    assert with_system({"system"}) < with_system(set()) - 0.1
+
+
+def test_the_clock_and_menu_have_their_own_stream(wallpaper_set):
+    look = generate(Dials(8, 4, 5), wallpaper_set, 12)
+    widgets = {widget.type for widget in look.widgets}
+    assert (look.bar.clock, look.bar.menu) == clock_and_menu(look.dials, widgets, stream(12, "menu"))
+    # the rest of the bar is what its own stage drew, as it was before there was a choice
+    assert dataclasses.replace(look.bar, clock="full", menu=()) == bar_for(look.dials, stream(12, "bar"))
 
 
 def test_cool_and_ease_pick_the_bar_style():

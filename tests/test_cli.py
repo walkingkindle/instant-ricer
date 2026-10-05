@@ -7,7 +7,7 @@ from PIL import Image
 
 from ricer import cli, topup
 from ricer.backends import FakeBackend
-from ricer.capabilities import (BLUR_UUID, DOCK_SCHEMA, MEDIA_CONTROLS_UUID, OPTIONAL_EXTENSIONS,
+from ricer.capabilities import (BLUR_UUID, DOCK_SCHEMA, MEDIA_CONTROLS_UUID, OPTIONAL_EXTENSIONS, RICER_UUID,
                                 USER_THEME_UUID, VITALS_UUID)
 from ricer.look import Dials
 
@@ -301,6 +301,32 @@ def test_setup_switches_user_extensions_back_on_and_enables_what_ricer_relies_on
     assert app.backend.extensions[USER_THEME_UUID] and app.backend.extensions[BLUR_UUID]
     assert app.backend.extensions[VITALS_UUID] is False      # left for each look to decide
     assert app.backend.install_requests == []
+
+
+def test_setup_copies_ricers_own_extension_in_and_says_when_it_loads(app):
+    code, text = run(app, "setup")
+    folder = app.paths.extensions_dir / RICER_UUID
+    assert code == 0 and (folder / "extension.js").is_file() and (folder / "metadata.json").is_file()
+    assert "installed  Ricer (the bar's clock and its menu): GNOME loads it when you next log in" in text
+    assert "Alt+F2" in text
+    assert "log out and back in" in run(app, "status")[1]
+
+    app.backend.extensions[RICER_UUID] = False               # after the next login GNOME knows it
+    assert "have       Ricer" in run(app, "setup")[1]
+    assert "yes  Bar clock and its menu" in run(app, "status")[1]
+    (folder / "extension.js").write_text("// an older version")
+    assert "updated    Ricer" in run(app, "setup")[1]
+
+
+def test_a_look_drives_the_bar_clock_and_menu_once_the_extension_is_loaded(app):
+    run(app, "setup")
+    app.backend.extensions[RICER_UUID] = False
+    code, text = run(app, "instant", "--cool", "9", "--ease", "3", "--seed", "5", "--json")
+    bar = json.loads(text[:text.rindex("}") + 1])["bar"]
+    assert code == 0 and bar["menu"]
+    assert app.backend.extensions[RICER_UUID] is True
+    assert json.loads(app.paths.shell_file.read_text())["menu"] == bar["menu"]
+    assert f"menu with {' '.join(bar['menu'])}" in run(app, "status")[1]
 
 
 # -- wallpapers and widgets -------------------------------------------------------------------

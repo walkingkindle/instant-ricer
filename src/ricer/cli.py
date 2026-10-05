@@ -7,8 +7,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from ricer import __version__, topup
-from ricer.capabilities import (BLUR_UUID, OPTIONAL_EXTENSIONS, USER_THEME_UUID, Capabilities, detect)
+from ricer import __version__, shell_extension, topup
+from ricer.capabilities import (BLUR_UUID, OPTIONAL_EXTENSIONS, RICER_UUID, USER_THEME_UUID, Capabilities,
+                                detect)
 from ricer.compose import compose
 from ricer.daemonctl import DaemonControl
 from ricer.engine import ApplyError, Engine, build_plan
@@ -20,6 +21,9 @@ from ricer.wallpapers import Library, NoWallpapersError
 
 DEFAULT_DIAL = 5
 DEFAULT_FETCH = 12
+# how `status` and each new look word what stands where the bar's clock is
+CLOCK_WORDS = {"time": "the time only", "date": "the date for a clock", "weekday": "the weekday for a clock",
+               "glyph": "an icon for a clock"}
 ALWAYS_ON = (USER_THEME_UUID, BLUR_UUID)                     # extensions ricer expects to stay enabled
 
 # One line per command, in the order they are listed. Used for --help and for 'ricer help'.
@@ -252,6 +256,10 @@ def _bar_line(look: Look) -> str:
         parts.append(f"{' '.join(bar.stats)} on the {bar.stats_side}")
     if bar.media:
         parts.append(f"player {'in the' if bar.media_side == 'center' else 'on the'} {bar.media_side}")
+    if bar.clock in CLOCK_WORDS:
+        parts.append(CLOCK_WORDS[bar.clock])
+    if bar.menu:
+        parts.append(f"menu with {' '.join(bar.menu)}")
     return ", ".join(parts)
 
 
@@ -376,6 +384,22 @@ def cmd_default(app: App, args, out) -> int:
     return 0
 
 
+def _setup_own_extension(app: App, out) -> None:
+    """Ricer's own extension: copied into place, since it ships with ricer."""
+    name = "Ricer (the bar's clock and its menu)"
+    try:
+        written = shell_extension.install(app.paths)
+    except OSError as error:
+        print(f"  skipped    {name}: {error}", file=out)
+        return
+    if app.backend.extension_installed(RICER_UUID):          # GNOME has it loaded
+        print(f"  updated    {name}: the new version loads when you next log in" if written
+              else f"  have       {name}", file=out)
+    else:
+        print(f"  installed  {name}: GNOME loads it when you next log in\n"
+              "             (on X11 sooner: press Alt+F2, type r, press Enter)", file=out)
+
+
 def cmd_setup(app: App, _args, out) -> int:
     backend = app.backend
     if not app.capabilities().extensions_allowed:
@@ -397,6 +421,8 @@ def cmd_setup(app: App, _args, out) -> int:
         if uuid in ALWAYS_ON and not backend.extension_enabled(uuid):
             backend.set_extension_enabled(uuid, True)
             print(f"  enabled    {name}", file=out)
+
+    _setup_own_extension(app, out)
 
     look = app.engine.current_look()
     if look is not None:                                     # make the new pieces match the look

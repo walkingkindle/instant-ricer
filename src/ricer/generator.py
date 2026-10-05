@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 
 from ricer import metrics, placement
 from ricer.chance import bump, chance, jitter, noisy_dial, pick, stream
-from ricer.look import (DIAL_MIN, WIDGET_TYPES, Bar, Dials, Dock, Look, Palette, Style, WidgetSpec,
+from ricer.look import (DIAL_MIN, MENU_SECTIONS, WIDGET_TYPES, Bar, Dials, Dock, Look, Palette, Style, WidgetSpec,
                         dial_fraction)
 from ricer.palette import build_palette, nearest_gtk_accent, terminal_colors, terminal_transparency
 from ricer.placement import Box
@@ -18,6 +18,7 @@ from ricer.wallpapers import Wallpaper, choose
 
 SCREEN = (1920, 1080)
 MAX_WIDGETS = 6
+MAX_MENU_CARDS = 4                   # more would make the menu taller than its calendar
 COLUMN_WIDTH = (280, 340)            # px before scaling: the range a stack of cards may share
 PLACEMENT_KEYS = ("fill", "width", "align")              # options that placement decides
 
@@ -97,6 +98,42 @@ def bar_for(dials: Dials, rng) -> Bar:
     media_side = pick(rng, {side: weight * (0.25 if side == stats_side and stats else 1.0)
                             for side, weight in (("left", 0.45), ("center", 0.2), ("right", 0.35))}, chaos)
     return Bar(style=style, stats=stats, stats_side=stats_side, media=media, media_side=media_side)
+
+
+def clock_and_menu(dials: Dials, on_desktop: set[str], rng) -> tuple[str, tuple[str, ...]]:
+    """What stands where the bar's clock is, and the cards in the menu that opens from it.
+
+    `on_desktop` is the widget types the look draws: a clock there frees the bar to show
+    something else, and a card repeats what a widget already shows less often.
+    """
+    cool, ease, warm = _fractions(dials)
+    chaos = dials.chaos
+    # the time has to be somewhere: the bar gives it up only to a clock on the desktop, and
+    # since windows cover the desktop, a look built for use keeps it in the bar regardless
+    spare = (1 - ease) ** 0.7 if "clock" in on_desktop else 0.0
+    clock = pick(rng, {
+        "full": 1.0,
+        "time": 0.35 + 0.5 * cool,
+        "date": 2.2 * spare,
+        "weekday": (0.9 + 0.8 * warm) * spare,
+        "glyph": (0.5 + 1.2 * cool) * spare,
+    }, chaos)
+
+    count = round(rng.gauss(0.6 + 3.2 * cool, 0.3 + 0.08 * (chaos - DIAL_MIN)))
+    if dials.cool <= 2:
+        count = 0                                            # the calm end leaves the menu alone
+    weights = {
+        "profile": 1.6,
+        "system": (1.2 + 0.6 * ease) * (0.5 if "system" in on_desktop else 1.0),
+        "progress": (0.7 + 0.3 * (1 - warm)) * (0.5 if "progress" in on_desktop else 1.0),
+        "fetch": 0.6 + 0.7 * (1 - warm),
+        "palette": 0.3 + 0.8 * cool,
+    }
+    chosen: set[str] = set()
+    for _ in range(max(0, min(MAX_MENU_CARDS, count))):
+        chosen.add(pick(rng, {name: weight for name, weight in weights.items()
+                              if name not in chosen}, chaos))
+    return clock, tuple(name for name in MENU_SECTIONS if name in chosen)
 
 
 def dock_for(dials: Dials, rng) -> Dock:
@@ -316,6 +353,10 @@ def generate(dials: Dials, wallpapers: list[Wallpaper], seed: int, screen: tuple
     widgets = place(specs, style, wallpaper, dock, dials, template, mirrored,
                     stream(seed, "placement"), screen,
                     fixed_zones=keep.layout is not None and keep.widgets is not None)
+
+    if not keep.bar:                                         # after the widgets: it looks at them
+        clock, menu = clock_and_menu(dials, {widget.type for widget in widgets}, stream(seed, "menu"))
+        bar = replace(bar, clock=clock, menu=menu)
 
     extras = stream(seed, "extras")
     look = Look(

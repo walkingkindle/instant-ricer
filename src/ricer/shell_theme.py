@@ -40,6 +40,8 @@ def render(look: Look, base_import: str) -> str:
         "accent_end": palette.accent2 if style.gradient else palette.accent,
         "accent2_rgb": _rgb_triplet(palette.accent2),
         "text": palette.text,
+        "text_rgb": _rgb_triplet(palette.text),
+        "accent_rgb": _rgb_triplet(palette.accent),
         "card": palette.card,
         "card_rgb": _rgb_triplet(palette.card),
         "bar_alpha": max(0.5, style.fill),                   # the bar always needs a readable backing
@@ -48,6 +50,7 @@ def render(look: Look, base_import: str) -> str:
         "radius": radius,
         "button_radius": max(4, radius - 4),
         "menu_radius": min(24, style.radius + 2),
+        "card_radius": max(3, min(16, style.radius - 4)),    # cards inside a menu, a step tighter
         "font_size": round(BASE_FONT_SIZE * style.scale, 1),
         "panel_height": floating,
         "island_height": floating - 10,                      # its 7px + 3px margins make up the rest

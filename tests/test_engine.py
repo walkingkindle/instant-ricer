@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from ricer import engine, gtk_theme
+from ricer import engine, gtk_theme, shell_extension
 from ricer.backends import FakeBackend, gv, gv_uint
-from ricer.capabilities import MEDIA_CONTROLS_UUID, VITALS_UUID
+from ricer.capabilities import MEDIA_CONTROLS_UUID, RICER_UUID, VITALS_UUID
 from ricer.engine import ApplyError, Engine, build_plan, sibling_theme
 from ricer.generator import generate
 from ricer.look import Bar, Dials, Dock, WidgetSpec
@@ -18,7 +18,7 @@ from conftest import PROFILE
 TERMINAL = f"/org/gnome/terminal/legacy/profiles:/:{PROFILE}/"
 HOME_ICON = engine.DESKTOP_ICONS + "show-home"
 DRIVE_ICONS = engine.DESKTOP_ICONS + "show-volumes"
-BAR_EXTENSIONS = {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False}
+BAR_EXTENSIONS = {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False, RICER_UUID: False}
 
 
 class FakeDaemon:
@@ -104,7 +104,7 @@ def test_plan_dock_settings_follow_the_look(look, full_caps, paths):
 def test_plan_puts_widgets_in_the_bar_through_the_two_extensions(look, full_caps, paths):
     plan = build_plan(look, full_caps, paths)
     s = plan.settings
-    assert plan.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True}
+    assert plan.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True, RICER_UUID: True}
     assert s[engine.VITALS + "hot-sensors"] == "['_processor_usage_', '_memory_usage_', '__temperature_avg__']"
     assert s[engine.VITALS + "position-in-panel"] == "2" and s[engine.VITALS + "show-battery"] == "false"
     assert s[engine.MEDIA + "extension-position"] == "'Left'"
@@ -124,7 +124,7 @@ def test_plan_puts_widgets_in_the_bar_through_the_two_extensions(look, full_caps
 
 def test_a_look_with_an_empty_bar_switches_the_extensions_off(plain, full_caps, paths):
     plan = build_plan(plain, full_caps, paths)
-    assert plan.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False}
+    assert plan.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False, RICER_UUID: True}
     assert not any(path.startswith((engine.VITALS, engine.MEDIA)) for path in plan.settings)
     assert plan.settings[engine.USER_THEME_NAME] == "''" and paths.shell_theme_file not in plan.files
 
@@ -218,9 +218,9 @@ def test_apply_writes_settings_files_extensions_and_state(look, full_caps, paths
     result = eng.apply(look, full_caps)
     plan = build_plan(look, full_caps, paths)
     assert backend.values == plan.settings
-    assert backend.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True}
+    assert backend.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True, RICER_UUID: True}
     assert result.changed == (len(plan.settings) + len(plan.files) + len(plan.links)
-                              + len(plan.blocks) + 2)
+                              + len(plan.blocks) + 3)
     assert paths.shell_theme_file.read_text() == plan.files[paths.shell_theme_file]
     assert paths.autostart_file.is_file() and daemon.syncs == 1
     assert eng.current_look() == look and len(eng.history()) == 1
@@ -268,7 +268,7 @@ def test_applying_the_same_look_twice_changes_nothing(look, full_caps, paths, ba
 def test_revert_restores_the_exact_prior_state(look, full_caps, paths):
     before = {engine.INTERFACE + "gtk-theme": "'Yaru'", engine.DOCK + "dock-position": "'LEFT'",
               "/org/unrelated/key": "'untouched'"}
-    backend = FakeBackend(before, extensions={VITALS_UUID: False, MEDIA_CONTROLS_UUID: True})
+    backend = FakeBackend(before, extensions={VITALS_UUID: False, MEDIA_CONTROLS_UUID: True, RICER_UUID: False})
     paths.widgets_file.parent.mkdir(parents=True)
     paths.widgets_file.write_text("old config")
     eng = Engine(backend, paths)
@@ -277,7 +277,7 @@ def test_revert_restores_the_exact_prior_state(look, full_caps, paths):
 
     assert eng.revert() > 0
     assert backend.values == before                          # keys that were unset are unset again
-    assert backend.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: True}
+    assert backend.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: True, RICER_UUID: False}
     assert paths.widgets_file.read_text() == "old config"
     assert not paths.shell_theme_file.exists() and not paths.autostart_file.exists()
     assert list(paths.themes_dir.iterdir()) == [] and not paths.sheets_dir.parent.exists()
@@ -287,12 +287,12 @@ def test_revert_restores_the_exact_prior_state(look, full_caps, paths):
 
 def test_revert_undoes_one_look_and_all_undoes_everything(look, plain, full_caps, paths):
     before = {engine.DOCK + "dash-max-icon-size": "48"}
-    backend = FakeBackend(before, extensions={VITALS_UUID: True, MEDIA_CONTROLS_UUID: False})
+    backend = FakeBackend(before, extensions={VITALS_UUID: True, MEDIA_CONTROLS_UUID: False, RICER_UUID: False})
     eng = Engine(backend, paths)
     eng.apply(look, full_caps)
     after_first, extensions_first = dict(backend.values), dict(backend.extensions)
     eng.apply(plain, full_caps)
-    assert backend.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False}
+    assert backend.extensions == {VITALS_UUID: False, MEDIA_CONTROLS_UUID: False, RICER_UUID: True}
 
     eng.revert()
     assert backend.values == after_first and backend.extensions == extensions_first
@@ -301,7 +301,7 @@ def test_revert_undoes_one_look_and_all_undoes_everything(look, plain, full_caps
     eng.apply(plain, full_caps)
     assert eng.revert(everything=True) > 0
     assert backend.values == before
-    assert backend.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: False}
+    assert backend.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: False, RICER_UUID: False}
     assert not paths.widgets_file.exists() and eng.history() == []
     assert eng.revert(everything=True) == 0
 
@@ -361,12 +361,47 @@ def test_state_saved_by_version_one_does_not_break_anything(look, full_caps, pat
     assert backend.values == {engine.DOCK + "dock-position": "'LEFT'"}   # the oldest record wins
 
 
+def test_the_bar_clock_and_menu_go_to_ricers_own_extension(look, plain, full_caps, paths):
+    wanted = dataclasses.replace(look, bar=dataclasses.replace(look.bar, clock="weekday",
+                                                               menu=("profile", "fetch")))
+    plan = build_plan(wanted, full_caps, paths)
+    config = json.loads(plan.files[paths.shell_file])
+    assert config == shell_extension.config(wanted, full_caps)
+    assert config["clock"]["format"] == "%A" and config["menu"] == ["profile", "fetch"]
+    assert plan.extensions[RICER_UUID] is True and not plan.notices
+    # a look that asks for nothing keeps it on and tells it so, rather than switching it about
+    quiet = build_plan(plain, full_caps, paths)
+    assert quiet.extensions[RICER_UUID] is True
+    assert json.loads(quiet.files[paths.shell_file])["clock"]["form"] == "full"
+
+
+def test_without_ricers_extension_the_bar_keeps_gnomes_clock(look, plain, full_caps, paths):
+    wanted = dataclasses.replace(look, bar=dataclasses.replace(look.bar, clock="glyph"))
+    missing = dataclasses.replace(full_caps, shell_extension=False)
+    plan = build_plan(wanted, missing, paths)
+    assert paths.shell_file not in plan.files and RICER_UUID not in plan.extensions
+    assert [n for n in plan.notices if "ricer setup" in n and "clock" in n]
+    waiting = dataclasses.replace(missing, shell_extension_waiting=True)
+    assert [n for n in build_plan(wanted, waiting, paths).notices if "next log in" in n]
+    menu_only = dataclasses.replace(look, bar=dataclasses.replace(look.bar, menu=("system",)))
+    assert [n for n in build_plan(menu_only, missing, paths).notices if "ricer setup" in n]
+    assert not build_plan(plain, missing, paths).notices     # nothing asked for, nothing to say
+
+
+def test_revert_all_switches_ricers_extension_off_and_removes_its_file(look, full_caps, paths, backend):
+    eng = Engine(backend, paths)
+    eng.apply(look, full_caps)
+    assert backend.extensions[RICER_UUID] is True and paths.shell_file.is_file()
+    eng.revert(everything=True)
+    assert backend.extensions[RICER_UUID] is False and not paths.shell_file.exists()
+
+
 def test_a_widget_that_cannot_show_on_wayland_leaves_icons_and_autostart_alone(look, full_caps, paths):
     wayland = dataclasses.replace(full_caps, session="wayland")
     plan = build_plan(look, wayland, paths)
     assert plan.files[paths.autostart_file] is None and HOME_ICON not in plan.settings
     assert any("X11" in notice for notice in plan.notices)
-    assert plan.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True}   # bar widgets still work
+    assert plan.extensions == {VITALS_UUID: True, MEDIA_CONTROLS_UUID: True, RICER_UUID: True}   # bar widgets still work
 
 
 def test_widget_specs_reach_the_file_unchanged(look, full_caps, paths):

@@ -15,6 +15,10 @@ DIAL_NAMES = ("cool", "ease", "warmth", "chaos")
 BAR_STYLES = ("stock", "minimal", "island", "cards", "solid")
 BAR_SIDES = ("left", "center", "right")
 BAR_STATS = ("cpu", "ram", "temp", "net", "battery")
+# what the bar shows where the clock is: "full" is GNOME's own date and time, "glyph" an icon
+BAR_CLOCKS = ("full", "time", "date", "weekday", "glyph")
+# cards ricer can add to the menu that opens from the clock
+MENU_SECTIONS = ("profile", "system", "progress", "fetch", "palette")
 DOCK_POSITIONS = ("BOTTOM", "LEFT", "RIGHT")
 DOCK_INDICATORS = ("DOTS", "SQUARES", "DASHES", "SEGMENTED", "SOLID", "CILIORA", "METRO")
 BORDERS = ("none", "hairline", "accent")
@@ -122,9 +126,14 @@ class Bar:
     stats_side: str = "right"
     media: bool = False              # now playing, with controls, in the bar
     media_side: str = "left"
+    clock: str = "full"              # what stands where the clock is
+    menu: tuple[str, ...] = ()       # cards added to the menu that opens from the clock
 
     def validate(self) -> None:
         _one_of("bar.style", self.style, BAR_STYLES)
+        _one_of("bar.clock", self.clock, BAR_CLOCKS)
+        _require(all(s in MENU_SECTIONS for s in self.menu) and len(set(self.menu)) == len(self.menu),
+                 f"bar.menu must be distinct members of {MENU_SECTIONS}, got {self.menu!r}")
         _require(all(s in BAR_STATS for s in self.stats) and len(set(self.stats)) == len(self.stats),
                  f"bar.stats must be distinct members of {BAR_STATS}, got {self.stats!r}")
         _one_of("bar.stats_side", self.stats_side, BAR_SIDES)
@@ -214,6 +223,7 @@ class Look:
         try:
             bar = dict(data["bar"])
             bar["stats"] = tuple(bar.get("stats", ()))
+            bar["menu"] = tuple(bar.get("menu", ()))         # looks from before 0.5 have none
             return cls(
                 dials=Dials(**data["dials"]),
                 seed=data["seed"],

@@ -115,7 +115,7 @@ def full_caps(stock_themes):
         font="Ubuntu Sans", clock_24h=True, vitals=True, media_controls=True, desktop_icons=True,
         fonts=dict(FONTS), screen=(1920, 1080),
         installed=frozenset({USER_THEME_UUID, BLUR_UUID, VITALS_UUID, MEDIA_CONTROLS_UUID}),
-        gtk3_themes=stock_themes, terminal_glass=True,
+        gtk3_themes=stock_themes, terminal_glass=True, shell_extension=True,
     )
 
 

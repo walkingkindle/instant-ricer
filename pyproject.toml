@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "instant-ricer"
-version = "0.4.0"
+version = "0.5.0"
 description = "A desktop ricing engine for GNOME: four dials, a different look on every run."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,7 @@ ricer = "ricer.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ricer = ["data/*.tmpl"]
+ricer = ["data/*.tmpl", "data/extension/*"]
 
 # The manual page. pip puts it under the install prefix (share/man/man1), which is where
 # man looks for a command found in the matching bin directory; pipx links it into place too.

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from ricer import __version__, cli, topup
+from ricer.capabilities import RICER_UUID
 from ricer.look import DIAL_NAMES, KEEP_PARTS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -90,7 +91,8 @@ def test_every_example_in_the_page_is_a_command_that_parses(page):
 def test_the_files_it_names_are_the_ones_ricer_uses(page, tmp_path):
     from ricer.paths import Paths
     paths = Paths.from_env({"HOME": "/home/someone"})
-    for path in (paths.state_file, paths.default_file, paths.widgets_file, paths.autostart_file,
+    for path in (paths.state_file, paths.default_file, paths.widgets_file, paths.shell_file,
+                 paths.extensions_dir / RICER_UUID, paths.autostart_file,
                  paths.wallpapers, paths.shell_theme_file.parent.parent, paths.cache):
         shown = "~" + str(path)[len("/home/someone"):]
         assert shown in page, shown

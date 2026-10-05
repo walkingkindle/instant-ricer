@@ -40,6 +40,15 @@ class Paths:
         return self.config / "widgets.json"
 
     @property
+    def shell_file(self) -> Path:
+        """What ricer's own shell extension reads: the bar clock and the cards in its menu."""
+        return self.config / "shell.json"
+
+    @property
+    def extensions_dir(self) -> Path:
+        return self.data / "gnome-shell" / "extensions"
+
+    @property
     def wallpaper_cache(self) -> Path:
         return self.cache / "wallpapers.json"
 

@@ -1,5 +1,5 @@
 .\" Manual page for ricer. Kept in step with the command line by tests/test_manpage.py.
-.TH RICER 1 "2026-10-05" "ricer 0.4.0" "User Commands"
+.TH RICER 1 "2026-10-06" "ricer 0.5.0" "User Commands"
 .SH NAME
 ricer \- compose and apply a different GNOME desktop look on every run
 .SH SYNOPSIS
@@ -169,8 +169,16 @@ my Shell, Vitals, Media Controls), ask GNOME Shell to install it from
 extensions.gnome.org. GNOME shows its own dialog for each one, and nothing is
 installed unless you confirm it there. If GNOME has all user extensions switched
 off, they are switched back on, and User Themes and Blur my Shell are enabled if
-they were installed but switched off. The current look is then applied again so
-that it uses what has become available.
+they were installed but switched off.
+.PP
+The command also copies in the extension that comes with
+.B ricer
+itself, which draws what a look puts where the bar's clock is and in the menu
+under it. GNOME Shell finds a new extension only when it starts: log out and
+back in, or on X11 press Alt+F2, type r and press Enter.
+.PP
+The current look is then applied again so that it uses what has become
+available.
 .SS ricer wallpapers
 .TP
 .B list
@@ -238,6 +246,16 @@ the wallpaper is calm and its subject stays uncovered.
 .B Top bar
 Left as it is, plain and transparent, one floating piece, three floating cards,
 or solid. System stats and a media player can sit in the bar itself.
+When the desktop has a clock of its own, the bar may show only the date, the
+weekday or an icon where its clock was; without one it always shows the time.
+.TP
+.B The menu under the clock
+The calendar, notifications and cards in the menu that opens from the bar's
+clock take the look's colours. A look may add up to four cards of its own
+beside the calendar: who is logged in and for how long, processor, memory,
+temperature and disk, how far the day, week, month and year have gone, a
+summary of the machine, and the look's colours with its seed. They update only
+while the menu is open.
 .TP
 .B Windows
 App windows take the colour of the look's cards, its accent, and the outline its
@@ -339,6 +357,16 @@ The default look.
 .I \(ti/.config/ricer/widgets.json
 What the widget process draws. Rewritten by every look; the process follows it.
 .TP
+.I \(ti/.config/ricer/shell.json
+What the bar shows where its clock is, and the cards in the menu under it.
+Rewritten by every look; the extension that comes with
+.B ricer
+follows it.
+.TP
+.I \(ti/.local/share/gnome\-shell/extensions/ricer@walkingkindle.github.io/
+That extension, copied there by
+.BR "ricer setup" .
+.TP
 .I \(ti/.config/ricer/wallpapers.json
 What
 .B ricer wallpapers auto
@@ -394,7 +422,10 @@ Features that depend on something this desktop lacks are skipped, and
 .B ricer
 says which. The top bar's style needs the User Themes extension, stats in the
 bar need Vitals, a player in the bar needs Media Controls, and blur needs Blur
-my Shell.
+my Shell. Changing what stands where the bar's clock is, and adding cards to
+its menu, needs the extension that comes with
+.B ricer
+and GNOME Shell 46; the menu takes the look's colours without it.
 .B ricer setup
 installs them.
 .PP

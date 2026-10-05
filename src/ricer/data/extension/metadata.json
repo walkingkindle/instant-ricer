@@ -1,0 +1,7 @@
+{
+  "uuid": "ricer@walkingkindle.github.io",
+  "name": "Ricer",
+  "description": "Lets a ricer look choose what the top bar shows where the clock is, and adds cards to the menu that opens from it. Does nothing until ricer applies a look that asks for it.",
+  "shell-version": ["46"],
+  "url": "https://github.com/walkingkindle/instant-ricer"
+}

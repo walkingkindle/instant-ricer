@@ -42,3 +42,114 @@
   color: $card;
   background-color: $accent;
 }
+#panel .clock-display .ricer-clock-glyph { color: $accent; }
+
+/* the menu that opens from the clock: its cards, calendar and notifications */
+.datemenu-popover { color: $text; }
+.message, .events-button, .world-clocks-button, .weather-button {
+  color: $text;
+  background-color: rgba($text_rgb, 0.06);
+  border: 1px solid $border;
+  border-radius: ${card_radius}px;
+}
+.message:hover, .events-button:hover, .world-clocks-button:hover, .weather-button:hover,
+.datemenu-today-button:hover {
+  color: $text;
+  background-color: rgba($text_rgb, 0.10);
+}
+.message:active, .events-button:active, .world-clocks-button:active, .weather-button:active,
+.datemenu-today-button:active, .message:active:hover, .events-button:active:hover,
+.world-clocks-button:active:hover, .weather-button:active:hover, .datemenu-today-button:active:hover {
+  color: $text;
+  background-color: rgba($text_rgb, 0.15);
+}
+.message:focus, .events-button:focus, .world-clocks-button:focus, .weather-button:focus,
+.datemenu-today-button:focus, .message:focus:hover, .events-button:focus:hover,
+.world-clocks-button:focus:hover, .weather-button:focus:hover, .datemenu-today-button:focus:hover,
+.message:active:focus, .events-button:active:focus, .world-clocks-button:active:focus,
+.weather-button:active:focus, .datemenu-today-button:active:focus {
+  color: $text;
+  box-shadow: inset 0 0 0 2px $accent !important;
+  background-color: rgba($accent_rgb, 0.14);
+}
+.datemenu-today-button { border-radius: ${card_radius}px; }
+.datemenu-today-button .day-label { color: $accent; }
+.datemenu-today-button .date-label { color: $text; }
+
+.calendar .calendar-month-header .calendar-month-label { color: $text !important; }
+.calendar .calendar-month-header .pager-button { color: $text; }
+.calendar .calendar-month-header .pager-button:hover { background-color: rgba($text_rgb, 0.10); }
+.calendar .calendar-day-heading { color: rgba($text_rgb, 0.55); }
+.calendar .calendar-day { color: $text; }
+.calendar .calendar-day:hover { background-color: rgba($text_rgb, 0.10); }
+.calendar .calendar-day:selected { background-color: rgba($accent_rgb, 0.22); }
+.calendar .calendar-day.calendar-weekend { color: rgba($text_rgb, 0.6); }
+.calendar .calendar-day.calendar-other-month,
+.calendar .calendar-day.calendar-other-month.calendar-weekend { color: rgba($text_rgb, 0.3); }
+.calendar .calendar-day.calendar-today, .calendar .calendar-day.calendar-today:selected {
+  color: $card !important;
+  background-color: $accent;
+}
+.calendar .calendar-week-number {
+  color: rgba($text_rgb, 0.55);
+  background-color: rgba($text_rgb, 0.08);
+}
+
+.events-button .events-box .events-title, .events-button .events-box .events-list .event-box .event-time,
+.events-button .events-box .events-list .event-placeholder, .world-clocks-button .world-clocks-header,
+.world-clocks-button .world-clocks-grid .world-clocks-timezone,
+.weather-button .weather-box .weather-header-box .weather-header,
+.message .message-header, .message .message-header .message-header-content .event-time {
+  color: rgba($text_rgb, 0.55);
+}
+.world-clocks-button .world-clocks-header.no-world-clocks,
+.weather-button .weather-box .weather-header-box .weather-header.no-location { color: $text; }
+
+.message-list { border-color: rgba($text_rgb, 0.12); }
+.message-list .message-list-placeholder { color: rgba($text_rgb, 0.3); }
+.message .message-header .message-expand-button, .message .message-header .message-close-button {
+  color: $text;
+  background-color: rgba($text_rgb, 0.10);
+}
+.message .message-header .message-expand-button:hover,
+.message .message-header .message-close-button:hover { background-color: rgba($text_rgb, 0.2); }
+.message .message-box .message-icon.message-themed-icon { background-color: rgba($accent_rgb, 0.25); }
+.message-media-control { color: $text; }
+.message-media-control:hover { color: $text; background-color: rgba($text_rgb, 0.10); }
+.message-media-control:active { color: $text; background-color: rgba($accent_rgb, 0.28); }
+.message-media-control:insensitive { color: rgba($text_rgb, 0.35); }
+.notification-button { color: $text; background-color: rgba($text_rgb, 0.08); }
+.notification-button:hover { color: $text; background-color: rgba($text_rgb, 0.14); }
+.message-list-controls { color: $text; }
+.message-list-controls .dnd-button:focus { border-color: $accent; }
+.message-list-clear-button.button {
+  color: $text;
+  background-color: rgba($text_rgb, 0.08);
+  border-radius: ${card_radius}px;
+}
+.message-list-clear-button.button:hover { color: $text; background-color: rgba($text_rgb, 0.14); }
+.message-list-clear-button.button:insensitive {
+  color: rgba($text_rgb, 0.35);
+  background-color: rgba($text_rgb, 0.04);
+}
+
+/* cards ricer's own extension adds to that menu */
+#calendarArea .ricer-card {
+  color: $text;
+  background-color: rgba($text_rgb, 0.06);
+  border: 1px solid $border;
+  border-radius: ${card_radius}px;
+}
+#calendarArea .ricer-title, #calendarArea .ricer-key, #calendarArea .ricer-dim {
+  color: rgba($text_rgb, 0.55);
+}
+#calendarArea .ricer-fetch-key, #calendarArea .ricer-name { color: $accent; }
+#calendarArea .ricer-track { background-color: rgba($text_rgb, 0.12); }
+#calendarArea .ricer-fill {
+  background-color: $accent;
+  background-gradient-direction: horizontal;
+  background-gradient-start: $accent;
+  background-gradient-end: $accent_end;
+}
+#calendarArea .ricer-avatar { border: 2px solid $accent; background-color: rgba($text_rgb, 0.12); }
+#calendarArea .ricer-swatch { border: 1px solid rgba($text_rgb, 0.25); }

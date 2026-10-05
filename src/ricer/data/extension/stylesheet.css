@@ -1,0 +1,40 @@
+/* Sizes and spacing, with plain colours for a stock bar. A look that styles the bar
+   colours these from its own stylesheet, under #calendarArea so that it wins. */
+.ricer-dash { width: 21em; spacing: 2px; }
+.ricer-dash:ltr { margin-left: 6px; }
+.ricer-dash:rtl { margin-right: 6px; }
+
+.ricer-card {
+  border-radius: 9px;
+  padding: 0.9em 1em;
+  margin: 4px;
+  spacing: 0.55em;
+  background-color: rgba(128, 128, 128, 0.16);
+  border: 1px solid transparent;
+}
+.ricer-title { font-size: 0.82em; font-weight: bold; color: #8a8a8a; padding-bottom: 0.15em; }
+.ricer-title.ricer-caps { letter-spacing: 0.12em; }
+
+.ricer-row { spacing: 0.8em; }
+.ricer-key { width: 4.2em; color: #8a8a8a; }
+.ricer-value { width: 3.4em; text-align: right; font-weight: bold; font-feature-settings: "tnum"; }
+.ricer-track { height: 6px; border-radius: 3px; background-color: rgba(128, 128, 128, 0.28); }
+.ricer-fill { height: 6px; border-radius: 3px; background-color: #8a8a8a; }
+
+.ricer-profile { spacing: 1em; }
+.ricer-avatar {
+  width: 3.6em;
+  height: 3.6em;
+  border-radius: 999px;
+  background-size: cover;
+  background-color: rgba(128, 128, 128, 0.28);
+}
+.ricer-avatar StIcon { icon-size: 1.8em; }
+.ricer-name { font-size: 1.2em; font-weight: 800; }
+.ricer-dim { color: #8a8a8a; }
+
+.ricer-fetch-key { width: 4.6em; font-weight: bold; }
+.ricer-swatches { spacing: 0.5em; }
+.ricer-swatch { width: 1.7em; height: 1.7em; border-radius: 999px; border: 1px solid rgba(128, 128, 128, 0.4); }
+
+#panel .clock-display .ricer-clock-glyph { icon-size: 1.091em; }
