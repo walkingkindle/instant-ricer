@@ -5,12 +5,14 @@ import pytest
 
 from ricer import cli, wallpapers
 from ricer.backends import FakeBackend
-from ricer.capabilities import DOCK_SCHEMA, USER_THEME_UUID
+from ricer.capabilities import (BLUR_UUID, DOCK_SCHEMA, MEDIA_CONTROLS_UUID, OPTIONAL_EXTENSIONS,
+                                USER_THEME_UUID, VITALS_UUID)
 from ricer.look import Dials
 
 from conftest import solid, two_tone
 
 GNOME_X11 = {"XDG_CURRENT_DESKTOP": "ubuntu:GNOME", "XDG_SESSION_TYPE": "x11"}
+SHELL = "org.gnome.shell"
 
 
 class FakeDaemon:
@@ -34,10 +36,13 @@ def app(paths):
     paths.wallpapers.mkdir(parents=True)
     two_tone((230, 140, 40), (200, 80, 60)).save(paths.wallpapers / "warm.png")
     two_tone((30, 80, 200), (40, 160, 210)).save(paths.wallpapers / "cold.png")
+    two_tone((60, 40, 120), (30, 30, 60)).save(paths.wallpapers / "dusk.png")
     backend = FakeBackend(
         schemas={DOCK_SCHEMA},
-        effective={("org.gnome.shell", "enabled-extensions"): [USER_THEME_UUID]})
-    return cli.App(paths=paths, backend=backend, daemon=FakeDaemon(), env=GNOME_X11)
+        effective={(SHELL, "enabled-extensions"): [USER_THEME_UUID]},
+        extensions={USER_THEME_UUID: True})
+    return cli.App(paths=paths, backend=backend, daemon=FakeDaemon(), env=GNOME_X11,
+                   fonts=frozenset(), screen=(1920, 1080))
 
 
 def run(app, *argv):
@@ -46,64 +51,94 @@ def run(app, *argv):
     return code, out.getvalue()
 
 
-def parse(*argv):
-    return cli.build_parser().parse_args(["instant", *argv])
+def parse(*argv, command="instant"):
+    return cli.build_parser().parse_args([command, *argv])
 
+
+def seed_of(text):
+    return int(text.split("--seed ")[1].split()[0])
+
+
+# -- arguments --------------------------------------------------------------------------------
 
 def test_dials_default_to_five():
-    assert cli.dials_from(parse()) == Dials(5, 5, 5)
+    assert cli.dials_from(parse()) == Dials(5, 5, 5, 5)
 
 
-def test_all_sets_every_dial_and_single_flags_override():
-    assert cli.dials_from(parse("--all", "8")) == Dials(8, 8, 8)
-    assert cli.dials_from(parse("--all", "8", "--ease", "2")) == Dials(8, 2, 8)
-    assert cli.dials_from(parse("--warmth", "9")) == Dials(5, 5, 9)
+def test_all_sets_the_three_style_dials_but_not_chaos():
+    assert cli.dials_from(parse("--all", "8")) == Dials(8, 8, 8, 5)
+    assert cli.dials_from(parse("--all", "8", "--ease", "2", "--chaos", "9")) == Dials(8, 2, 8, 9)
+    assert cli.dials_from(parse("--warmth", "9")) == Dials(5, 5, 9, 5)
 
 
-@pytest.mark.parametrize("argv", [["--cool", "0"], ["--ease", "11"], ["--warmth", "x"],
-                                  ["--all", "12"], ["--shuffle", "--seed", "3"]])
+def test_reroll_starts_from_the_current_dials():
+    current = Dials(8, 3, 9, 7)
+    assert cli.dials_from(parse(command="reroll"), current) == current
+    assert cli.dials_from(parse("--chaos", "2", command="reroll"), current) == Dials(8, 3, 9, 2)
+    assert cli.dials_from(parse("--all", "4", command="reroll"), current) == Dials(4, 4, 4, 7)
+
+
+@pytest.mark.parametrize("argv", [["--cool", "0"], ["--ease", "11"], ["--warmth", "x"], ["--chaos", "0"],
+                                  ["--all", "12"], ["--keep", "sofa"], ["--keep", ""], ["--seed", "abc"]])
 def test_bad_arguments_are_refused(argv, capsys):
     with pytest.raises(SystemExit) as exit_info:
         parse(*argv)
     assert exit_info.value.code == 2
 
 
-def test_instant_applies_and_reports(app):
-    code, text = run(app, "instant", "--cool", "8", "--warmth", "10")
+def test_keep_takes_a_comma_separated_list():
+    assert parse("--keep", "wallpaper, style").keep == ["wallpaper", "style"]
+    assert parse().keep == []
+
+
+# -- instant ----------------------------------------------------------------------------------
+
+def test_instant_applies_and_says_how_to_get_the_look_back(app):
+    code, text = run(app, "instant", "--cool", "8", "--warmth", "10", "--chaos", "1")
     assert code == 0 and "Applied." in text
-    assert "warm.png" in text and "cool 8 · ease 5 · warmth 10" in text
+    assert "cool 8 · ease 5 · warmth 10 · chaos 1 · seed " in text and "wallpaper  warm.png" in text
+    assert f"This look again: ricer instant --cool 8 --ease 5 --warmth 10 --chaos 1 --seed {seed_of(text)}" in text
     assert "file://" + str(app.paths.wallpapers / "warm.png") in app.backend.values[
         "/org/gnome/desktop/background/picture-uri"]
     assert app.daemon.calls == ["sync"]
 
 
-def test_instant_twice_reports_no_changes(app):
-    run(app, "instant", "--all", "6")
-    code, text = run(app, "instant", "--all", "6")
-    assert code == 0 and "No changes" in text
+def test_every_run_is_a_different_look(app):
+    texts = [run(app, "instant", "--all", "7")[1] for _ in range(4)]
+    assert len({seed_of(text) for text in texts}) == 4
+    assert all("Applied." in text for text in texts)
+    walls = [text.split("wallpaper  ")[1].split()[0] for text in texts]
+    assert all(a != b for a, b in zip(walls, walls[1:]))     # never the same wallpaper twice running
+
+
+def test_a_seed_brings_the_same_look_back(app):
+    _, first = run(app, "instant", "--all", "6", "--seed", "4242", "--dry-run", "--json")
+    _, again = run(app, "instant", "--all", "6", "--seed", "4242", "--dry-run", "--json")
+    assert first == again and '"seed": 4242' in first
+    assert "Applied." in run(app, "instant", "--all", "6", "--seed", "4242")[1]
+    assert "No changes: this look is already applied." in run(app, "instant", "--all", "6", "--seed", "4242")[1]
 
 
 def test_dry_run_changes_nothing(app):
     code, text = run(app, "instant", "--all", "9", "--dry-run")
-    assert code == 0 and "Dry run" in text
+    assert code == 0 and "Dry run: nothing was changed." in text
     assert app.backend.values == {} and app.backend.writes == []
     assert not app.paths.state_file.exists() and not app.paths.widgets_file.exists()
     assert app.daemon.calls == []
-    assert "Blur my Shell" in text                       # the skip notice still shows
+    assert "Blur my Shell" in text                           # skip notices still show
 
 
 def test_json_output_is_the_look(app):
-    code, text = run(app, "instant", "--all", "4", "--dry-run", "--json")
+    _, text = run(app, "instant", "--all", "4", "--chaos", "8", "--seed", "5", "--dry-run", "--json")
     look = json.loads(text[:text.rindex("}") + 1])
-    assert look["dials"] == {"cool": 4, "ease": 4, "warmth": 4} and look["seed"] == 0
+    assert look["dials"] == {"cool": 4, "ease": 4, "warmth": 4, "chaos": 8} and look["seed"] == 5
 
 
-def test_seed_is_reproducible_and_shuffle_prints_one(app):
-    _, first = run(app, "instant", "--seed", "77", "--dry-run", "--json")
-    _, again = run(app, "instant", "--seed", "77", "--dry-run", "--json")
-    assert first == again and '"seed": 77' in first
-    code, text = run(app, "instant", "--shuffle")
-    assert code == 0 and "--seed " in text
+def test_the_description_lists_what_a_look_is_made_of(app):
+    _, text = run(app, "instant", "--cool", "9", "--ease", "9", "--seed", "11", "--dry-run")
+    for label in ("wallpaper", "style", "top bar", "dock", "desktop"):
+        assert f"  {label}" in text
+    assert "layout" in text and "clock" in text
 
 
 def test_empty_library_is_a_clear_error(app, capsys):
@@ -122,18 +157,84 @@ def test_other_desktops_are_refused_but_can_dry_run(app, capsys):
     assert run(app, "instant", "--dry-run")[0] == 0
 
 
+# -- keep and reroll --------------------------------------------------------------------------
+
+def test_keep_and_reroll_need_a_current_look(app, capsys):
+    assert run(app, "instant", "--keep", "wallpaper")[0] == 1
+    assert "--keep needs a current look" in capsys.readouterr().err
+    assert run(app, "reroll")[0] == 1
+    assert "no current look to reroll" in capsys.readouterr().err
+    assert app.backend.values == {}
+
+
+def test_keep_carries_parts_of_the_current_look_over(app):
+    _, first = run(app, "instant", "--all", "8", "--json")
+    before = json.loads(first[:first.rindex("}") + 1])
+    for _ in range(4):
+        _, text = run(app, "instant", "--all", "8", "--keep", "wallpaper,style", "--json")
+        after = json.loads(text[:text.rindex("}") + 1])
+        assert after["wallpaper"] == before["wallpaper"] and after["style"] == before["style"]
+        assert after["palette"] == before["palette"] and after["seed"] != before["seed"]
+        assert "plus what was kept: wallpaper, style" in text
+
+
+def test_reroll_keeps_the_dials_and_changes_the_look(app):
+    _, first = run(app, "instant", "--cool", "8", "--ease", "3", "--warmth", "6", "--chaos", "7")
+    code, text = run(app, "reroll")
+    assert code == 0 and "cool 8 · ease 3 · warmth 6 · chaos 7 · seed " in text
+    assert seed_of(text) != seed_of(first) and "Applied." in text
+    assert "cool 8 · ease 9 · warmth 6 · chaos 7" in run(app, "reroll", "--ease", "9")[1]
+
+
+# -- revert and status ------------------------------------------------------------------------
+
 def test_revert_and_status(app):
     assert "Nothing to revert" in run(app, "revert")[1]
-    assert "No look applied" in run(app, "status")[1]
-    run(app, "instant", "--all", "7")
     status = run(app, "status")[1]
-    assert "cool 7" in status and "Wallpapers: 2" in status and "Blur my Shell" in status
+    assert "No look applied" in status and "Wallpapers: 3" in status
+    assert "no   Stats in the top bar (install the 'Vitals' extension: ricer setup)" in status
+
+    run(app, "instant", "--all", "7", "--seed", "9")
+    assert "cool 7 · ease 7 · warmth 7 · chaos 5 · seed 9" in run(app, "status")[1]
     code, text = run(app, "revert")
     assert code == 0 and "Reverted" in text and app.backend.values == {}
+    assert "No look applied" in run(app, "status")[1]
+
     run(app, "instant", "--all", "7")
     run(app, "instant", "--all", "3")
     assert "Reverted" in run(app, "revert", "--all")[1] and app.backend.values == {}
 
+
+# -- setup ------------------------------------------------------------------------------------
+
+def test_setup_installs_what_is_missing_and_reapplies_the_look(app):
+    run(app, "instant", "--cool", "6", "--ease", "9", "--seed", "3")      # ease 9: the bar wants widgets
+    app.backend.installable = {VITALS_UUID, MEDIA_CONTROLS_UUID}          # the user accepts these two
+    for uuid in (VITALS_UUID, MEDIA_CONTROLS_UUID):                       # ...which GNOME then installs
+        (app.paths.data / "gnome-shell/extensions" / uuid).mkdir(parents=True)
+
+    code, text = run(app, "setup")
+    assert code == 0
+    assert "have       User Themes" in text and "installed  Vitals" in text
+    assert "skipped    Blur my Shell" in text and "1 extension(s) not installed" in text
+    assert app.backend.install_requests == [BLUR_UUID, VITALS_UUID, MEDIA_CONTROLS_UUID]
+    assert "Re-applied the current look" in text
+    assert app.backend.extensions[VITALS_UUID] is True                    # ease 9 puts stats in the bar
+    assert "/org/gnome/shell/extensions/vitals/hot-sensors" in app.backend.values
+
+
+def test_setup_switches_user_extensions_back_on_and_enables_what_ricer_relies_on(app):
+    app.backend.effective_values[(SHELL, "disable-user-extensions")] = True
+    app.backend.extensions = {uuid: False for uuid in OPTIONAL_EXTENSIONS}
+    code, text = run(app, "setup")
+    assert code == 0 and "switching them back on" in text and "Setup complete." in text
+    assert app.backend.effective_values[(SHELL, "disable-user-extensions")] is False
+    assert app.backend.extensions[USER_THEME_UUID] and app.backend.extensions[BLUR_UUID]
+    assert app.backend.extensions[VITALS_UUID] is False      # left for each look to decide
+    assert app.backend.install_requests == []
+
+
+# -- wallpapers and widgets -------------------------------------------------------------------
 
 def test_wallpapers_list_and_add(app, tmp_path, capsys):
     listing = run(app, "wallpapers", "list")[1]

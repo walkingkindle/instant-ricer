@@ -1,24 +1,16 @@
 
-/* top bar: a transparent strip holding three floating cards */
+/* top bar: one floating piece, clear of the screen edges */
 #panel {
-  background-color: transparent;
-  height: ${panel_height}px;
-  font-weight: 500;
-}
-#panel:overview, #panel.unlock-screen, #panel.login-screen {
-  background-color: transparent;
-}
-#panelLeft, #panelCenter, #panelRight {
   background-color: rgba($card_rgb, $bar_alpha);
   border: 1px solid $border;
   border-radius: ${radius}px;
-  margin-top: 7px;
-  margin-bottom: 3px;
-  padding: 0 4px;
+  margin: 7px 12px 3px 12px;
+  height: ${island_height}px;
+  font-weight: 500;
 }
-#panelLeft { margin-left: 12px; }
-#panelRight { margin-right: 12px; }
-
+#panel:overview, #panel.unlock-screen, #panel.login-screen {
+  background-color: rgba($card_rgb, $bar_alpha);
+}
 #panel .panel-button {
   color: $text;
   border-radius: ${button_radius}px;

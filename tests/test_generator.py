@@ -1,103 +1,327 @@
+import dataclasses
 import itertools
+import statistics
 
 import pytest
 
-from ricer.generator import generate
-from ricer.look import Dials, LookError
-from ricer.palette import hue_of, hue_warmth, saturation_of
+from ricer import generator, metrics
+from ricer.chance import stream
+from ricer.generator import (Kept, bar_for, dock_for, generate, kept_from, layout_for, style_for,
+                             widget_budget, widget_set)
+from ricer.look import ANCHORS, Bar, Dials, LookError
+from ricer.palette import hue_of, hue_warmth
 from ricer.wallpapers import NoWallpapersError
 
-from conftest import as_wallpaper, solid
-
-DIAL_VALUES = range(1, 11)
+SEEDS = range(1, 301)
 
 
-def test_same_dials_give_the_identical_look(wallpaper_set):
-    assert generate(Dials(7, 3, 9), wallpaper_set) == generate(Dials(7, 3, 9), wallpaper_set)
+def over_seeds(stage, dials, name):
+    """Run one stage of the generator for many seeds."""
+    return [stage(dials, stream(seed, name)) for seed in SEEDS]
 
 
-def test_wallpaper_order_does_not_matter(wallpaper_set):
-    assert (generate(Dials(4, 6, 2), wallpaper_set)
-            == generate(Dials(4, 6, 2), list(reversed(wallpaper_set))))
+def share(values, wanted):
+    return sum(1 for value in values if value == wanted) / len(values)
 
 
-def test_every_dial_combination_gives_a_valid_look(wallpaper_set):
-    for cool, ease, warmth in itertools.product(DIAL_VALUES, repeat=3):
-        look = generate(Dials(cool, ease, warmth), wallpaper_set)
+# -- the whole look ---------------------------------------------------------------------------
+
+def test_the_same_seed_gives_the_identical_look(wallpaper_set):
+    assert generate(Dials(7, 3, 9, 6), wallpaper_set, 42) == generate(Dials(7, 3, 9, 6), wallpaper_set, 42)
+    assert (generate(Dials(4, 6, 2), wallpaper_set, 5)
+            == generate(Dials(4, 6, 2), list(reversed(wallpaper_set)), 5))
+
+
+def test_different_seeds_give_different_looks(wallpaper_set):
+    looks = {str(generate(Dials(7, 5, 5), wallpaper_set, seed).to_dict()) for seed in range(1, 31)}
+    assert len(looks) == 30
+
+
+def test_random_looks_across_the_dial_space_are_all_valid(wallpaper_set):
+    combos = list(itertools.product((1, 4, 7, 10), repeat=4))
+    for index, (cool, ease, warmth, chaos) in enumerate(combos):
+        look = generate(Dials(cool, ease, warmth, chaos), wallpaper_set, 1000 + index)
         look.validate()
-        assert look.widgets[0].type == "clock"
+        assert len(look.widgets) <= generator.MAX_WIDGETS + 1
+        assert look.desktop_icons == (not look.widgets)
+        for widget in look.widgets:
+            assert widget.anchor in ANCHORS and 0 <= widget.options["fill"] <= 1
+            assert widget.options["align"] in ("left", "center", "right")
 
 
-def test_seeds_reproduce_and_differ(wallpaper_set):
-    dials = Dials(6, 5, 5)
-    assert generate(dials, wallpaper_set, seed=42) == generate(dials, wallpaper_set, seed=42)
-    looks = {str(generate(dials, wallpaper_set, seed=s).to_dict()) for s in range(1, 30)}
-    assert len(looks) > 3
-    for seed in range(1, 30):
-        generate(dials, wallpaper_set, seed=seed).validate()
-
-
-@pytest.mark.parametrize("bad", [Dials(0, 5, 5), Dials(5, 11, 5), Dials(5, 5, -1)])
+@pytest.mark.parametrize("bad", [Dials(0, 5, 5), Dials(5, 11, 5), Dials(5, 5, -1), Dials(chaos=0)])
 def test_out_of_range_dials_are_rejected(wallpaper_set, bad):
     with pytest.raises(LookError):
-        generate(bad, wallpaper_set)
+        generate(bad, wallpaper_set, 1)
 
 
-def test_empty_library_is_reported(wallpaper_set):
+def test_an_empty_library_is_reported():
     with pytest.raises(NoWallpapersError):
-        generate(Dials(), [])
+        generate(Dials(), [], 1)
 
 
-def by_dial(name, wallpapers, **fixed):
-    """The looks you get sweeping one dial from 1 to 10 with the others held."""
-    return [generate(Dials(**{**fixed, name: value}), wallpapers) for value in DIAL_VALUES]
+def test_warmth_moves_wallpaper_and_accent_on_average(wallpaper_set):
+    def lean(warmth):
+        looks = [generate(Dials(6, 5, warmth, 4), wallpaper_set, seed) for seed in range(1, 61)]
+        return (statistics.mean(hue_warmth(hue_of(look.palette.accent)) for look in looks),
+                share([look.wallpaper for look in looks], "/walls/warm.png"))
+
+    (cold_hue, cold_wall), (warm_hue, warm_wall) = lean(1), lean(10)
+    assert cold_hue < -0.3 < 0.3 < warm_hue
+    assert warm_wall > 0.5 > cold_wall
 
 
-@pytest.mark.parametrize("cool, warmth", [(1, 1), (5, 5), (10, 10), (3, 8)])
-def test_raising_ease_never_hides_the_dock_or_thins_the_cards(wallpaper_set, cool, warmth):
-    looks = by_dial("ease", wallpaper_set, cool=cool, warmth=warmth)
-    for lower, higher in zip(looks, looks[1:]):
-        assert higher.palette.card_alpha >= lower.palette.card_alpha
-        assert higher.dock.opacity >= lower.dock.opacity
-        assert higher.dock.icon_size >= lower.dock.icon_size
-        assert higher.widget_scale >= lower.widget_scale
-        assert not (higher.dock.autohide and not lower.dock.autohide)
-        assert len(higher.widgets) >= len(lower.widgets)
-    assert looks[0].dock.autohide and not looks[-1].dock.autohide
+# -- fixed rules that randomness may not break ------------------------------------------------
+
+def test_the_calm_end_stays_nearly_empty_and_the_loud_end_is_full():
+    for chaos in (1, 5, 10):
+        for cool in (1, 2):
+            counts = over_seeds(widget_budget, Dials(cool=cool, chaos=chaos), "widgets")
+            assert max(counts) <= 1
+    assert statistics.mean(over_seeds(widget_budget, Dials(cool=10), "widgets")) > 5.3
+    assert max(over_seeds(widget_budget, Dials(cool=10, chaos=10), "widgets")) <= 7
 
 
-@pytest.mark.parametrize("ease, warmth", [(1, 1), (5, 5), (10, 10), (8, 2)])
-def test_raising_cool_never_removes_widgets_or_shrinks_the_clock(wallpaper_set, ease, warmth):
-    looks = by_dial("cool", wallpaper_set, ease=ease, warmth=warmth)
-    for lower, higher in zip(looks, looks[1:]):
-        assert len(higher.widgets) >= len(lower.widgets)
-        assert higher.widgets[0].options["size"] >= lower.widgets[0].options["size"]
-        assert higher.blur >= lower.blur and higher.gradient >= lower.gradient
+def test_the_dock_never_hides_from_ease_seven_up():
+    for ease in range(1, 11):
+        for chaos in (1, 10):
+            docks = over_seeds(dock_for, Dials(ease=ease, chaos=chaos), "dock")
+            assert {dock.autohide for dock in docks} == {ease <= 6}
+            assert all(32 <= dock.icon_size <= 64 and dock.icon_size % 2 == 0 for dock in docks)
 
 
-def test_raising_cool_never_lowers_saturation_on_a_fixed_wallpaper():
-    one = [as_wallpaper("only", solid((60, 120, 200)))]
-    saturation = [saturation_of(look.palette.accent) for look in by_dial("cool", one, ease=5, warmth=5)]
-    assert all(b >= a - 0.01 for a, b in zip(saturation, saturation[1:]))
+def test_widgets_keep_clear_of_a_floating_dock(wallpaper_set):
+    for seed in range(1, 80):
+        look = generate(Dials(9, 4, 5, 8), wallpaper_set, seed)
+        zones = {widget.anchor for widget in look.widgets}
+        blocked = {"BOTTOM": "bottom-center", "LEFT": "left", "RIGHT": "right"}[look.dock.position]
+        assert look.dock.autohide and blocked not in zones
 
 
-def test_warmth_dial_moves_wallpaper_and_accent_the_right_way(wallpaper_set):
-    cold, warm = generate(Dials(8, 5, 1), wallpaper_set), generate(Dials(8, 5, 10), wallpaper_set)
-    assert cold.wallpaper.endswith("cold.png") and warm.wallpaper.endswith("warm.png")
-    assert hue_warmth(hue_of(cold.palette.accent)) < 0 < hue_warmth(hue_of(warm.palette.accent))
+def test_a_cardless_look_frames_all_its_cards_or_none(wallpaper_set):
+    by_name = {w.path: w for w in wallpaper_set}
+    # dark and flat: cards can be left off.  Noise: every card is needed.
+    for name, expected in (("/walls/dusk.png", 0.0), ("/walls/noisy.png", 0.55)):
+        checked = 0
+        for seed in range(1, 120):
+            look = generate(Dials(8, 2, 5, 6), [by_name[name]], seed)
+            framed = [w.options["fill"] for w in look.widgets
+                      if w.type in metrics.STRUCTURED and not (w.type == "system" and w.design == "line")]
+            if look.style.fill == 0 and framed:
+                assert set(framed) == {expected}
+                checked += 1
+        assert checked > 10
 
 
-def test_the_extremes_look_like_the_plan_says(wallpaper_set):
-    minimal = generate(Dials(1, 1, 5), wallpaper_set)
-    assert [w.type for w in minimal.widgets] == ["clock"]
-    assert minimal.bar_style == "stock" and not minimal.blur and not minimal.gradient
+def test_cards_get_more_opaque_over_a_busy_wallpaper(wallpaper_set, lopsided):
+    from ricer.generator import card_fill
+    from ricer.look import Style, WidgetSpec
+    busy, calm = (0.9, 0.5, 0.2), (0.05, 0.1, 0.0)
+    card = WidgetSpec("media", "card", "left")
+    assert card_fill(card, Style(fill=0.4), busy) == 0.6 and card_fill(card, Style(fill=0.4), calm) == 0.4
+    assert card_fill(card, Style(fill=0.8), busy) == 0.8
+    assert card_fill(card, Style(fill=0.0), busy) == 0.55 and card_fill(card, Style(fill=0.0), calm) == 0.0
+    big_clock = WidgetSpec("clock", "digital", "top-center", {"size": 120})
+    small_clock = WidgetSpec("clock", "digital", "top-center", {"size": 64})
+    assert card_fill(big_clock, Style(fill=0.6), busy) == 0.0          # big text carries itself
+    assert card_fill(big_clock, Style(fill=0.6), (0.1, 0.8, 0.0)) == 0.45   # except on near-white
+    assert card_fill(small_clock, Style(fill=0.6), calm) == 0.6
+    line = WidgetSpec("system", "line", "left")
+    assert card_fill(line, Style(fill=0.0), busy) == 0.5 and card_fill(line, Style(fill=0.0), calm) == 0.0
 
-    practical = generate(Dials(5, 10, 5), wallpaper_set)
-    assert practical.bar_style == "solid" and not practical.dock.floating
-    system = next(w for w in practical.widgets if w.type == "system")
-    assert system.options["rows"] == ["cpu", "ram", "temp", "gpu", "battery"]
 
-    flashy = generate(Dials(10, 3, 5), wallpaper_set)
-    assert flashy.bar_style == "cards" and flashy.blur and flashy.gradient
-    assert {w.type for w in flashy.widgets} == {"clock", "media", "system"}
-    assert flashy.widgets[0].options["thin"]
+def test_cards_stacked_in_one_zone_share_a_width(wallpaper_set):
+    matched = 0
+    for seed in range(1, 150):
+        look = generate(Dials(9, 9, 5, 5), wallpaper_set, seed)
+        zones = {}
+        for widget in look.widgets:
+            if (widget.type, widget.design) in metrics.WIDTH_AWARE:
+                zones.setdefault(widget.anchor, []).append(widget.options.get("width"))
+        for widths in zones.values():
+            if len(widths) > 1 and widths[0] is not None:
+                assert len(set(widths)) == 1
+                matched += 1
+    assert matched > 20
+
+
+def test_the_clock_leaves_the_date_to_the_greeting():
+    for seed in SEEDS:
+        specs = {spec.type: spec for spec in widget_set(Dials(9, 5, 9, 5), Bar(), seed, stream(seed, "widgets"))}
+        if "clock" in specs and "greeting" in specs:
+            assert specs["clock"].options["date"] is False
+
+
+# -- the dials tilt the odds ------------------------------------------------------------------
+
+def test_cool_raises_the_number_of_desktop_widgets():
+    means = [statistics.mean(over_seeds(widget_budget, Dials(cool=cool), "widgets")) for cool in range(1, 11)]
+    assert all(later >= earlier - 0.05 for earlier, later in zip(means, means[1:]))
+    assert means[0] < 0.2 and 2.6 < means[4] < 3.4 and means[9] > 5.3
+
+
+def test_chaos_widens_the_spread_of_the_budget():
+    calm = statistics.pstdev(over_seeds(widget_budget, Dials(cool=6, chaos=1), "widgets"))
+    wild = statistics.pstdev(over_seeds(widget_budget, Dials(cool=6, chaos=10), "widgets"))
+    assert wild > 2 * calm
+
+
+def test_ease_puts_more_into_the_bar():
+    def bar_stats(ease):
+        bars = over_seeds(bar_for, Dials(ease=ease), "bar")
+        return (share([bool(bar.stats) for bar in bars], True), share([bar.media for bar in bars], True),
+                statistics.mean(len(bar.stats) for bar in bars))
+
+    low, mid, high = bar_stats(2), bar_stats(5), bar_stats(9)
+    assert low[0] < 0.05 and low[1] < 0.02
+    assert 0.5 < mid[0] < 0.95 and mid[1] < 0.2
+    assert high[0] > 0.99 and high[1] > 0.95 and high[2] > 4
+    assert low[2] < mid[2] < high[2]
+
+
+def test_bar_groups_prefer_opposite_sides():
+    bars = [bar for bar in over_seeds(bar_for, Dials(ease=9), "bar") if bar.stats and bar.media]
+    assert share([bar.stats_side == bar.media_side for bar in bars], True) < 0.3
+    assert {bar.stats_side for bar in bars} == {"left", "right"}
+
+
+def test_cool_and_ease_pick_the_bar_style():
+    def styles(**dials):
+        return [bar.style for bar in over_seeds(bar_for, Dials(**dials), "bar")]
+
+    assert share(styles(cool=1), "stock") > 0.45
+    assert share(styles(cool=5), "stock") == 0 and share(styles(cool=10), "stock") == 0
+    assert share(styles(cool=6), "island") > 0.4
+    assert share(styles(cool=10), "cards") > 0.6
+    assert share(styles(cool=6, ease=10), "solid") > 0.3 > 0.1 > share(styles(cool=6, ease=5), "solid")
+    assert len(set(styles(cool=5, chaos=10))) == 4           # everything but stock gets a turn
+
+
+def test_warmth_shapes_the_style():
+    cold, warm = over_seeds(style_for, Dials(warmth=1), "style"), over_seeds(style_for, Dials(warmth=10), "style")
+    assert statistics.mean(s.radius for s in cold) + 10 < statistics.mean(s.radius for s in warm)
+    assert share([s.voice for s in warm], "serif") > 3 * share([s.voice for s in cold], "serif")
+    assert share([s.voice for s in cold], "mono") > 3 * share([s.voice for s in warm], "mono")
+    assert share([s.border for s in cold], "accent") > share([s.border for s in warm], "accent") + 0.2
+    assert all(0 <= s.radius <= 40 for s in cold + warm)
+
+
+def test_ease_makes_cards_more_solid_and_text_bigger():
+    looks_first, usable = over_seeds(style_for, Dials(ease=1), "style"), over_seeds(style_for, Dials(ease=10), "style")
+    assert share([s.fill == 0 for s in looks_first], True) > 0.3
+    assert share([s.fill == 0 for s in usable], True) == 0
+    assert statistics.mean(s.fill for s in usable) > 0.65
+    assert statistics.mean(s.scale for s in usable) > statistics.mean(s.scale for s in looks_first) + 0.2
+    assert all(s.fill == 0 or s.fill >= 0.25 for s in looks_first + usable)
+
+
+def test_cool_brings_gradients():
+    assert share([s.gradient for s in over_seeds(style_for, Dials(cool=1), "style")], True) < 0.2
+    assert share([s.gradient for s in over_seeds(style_for, Dials(cool=10), "style")], True) == 1.0
+
+
+def design_shares(kind, **dials):
+    designs = []
+    for seed in SEEDS:
+        designs += [spec.design for spec in widget_set(Dials(**dials), Bar(), seed, stream(seed, "widgets"))
+                    if spec.type == kind]
+    return {design: share(designs, design) for design in set(designs)}
+
+
+def test_the_dials_tilt_which_designs_appear():
+    assert design_shares("clock", cool=7, warmth=10).get("analog", 0) > 2 * design_shares(
+        "clock", cool=7, warmth=1).get("analog", 0)
+    assert design_shares("clock", cool=10).get("stacked", 0) > 2 * design_shares("clock", cool=4).get("stacked", 0)
+    assert design_shares("calendar", cool=8, ease=10)["month"] > design_shares("calendar", cool=8, ease=1)["month"] + 0.2
+    assert design_shares("system", cool=10)["rings"] > design_shares("system", cool=5)["rings"] + 0.15
+    assert design_shares("media", cool=8, ease=1)["pill"] > design_shares("media", cool=8, ease=10).get("pill", 0) + 0.2
+    assert set(design_shares("clock", cool=8, chaos=10)) == {"digital", "stacked", "analog", "words"}
+
+
+def test_what_the_bar_already_shows_appears_less_on_the_desktop():
+    def system_share(bar):
+        sets = [{spec.type for spec in widget_set(Dials(cool=5), bar, seed, stream(seed, "widgets"))} for seed in SEEDS]
+        return share(["system" in types for types in sets], True)
+
+    assert system_share(Bar(stats=("cpu", "ram", "temp"))) < system_share(Bar()) - 0.1
+
+
+def test_ornaments_belong_to_the_loud_end():
+    def ornament_share(cool):
+        sets = [{spec.type for spec in widget_set(Dials(cool=cool), Bar(), seed, stream(seed, "widgets"))} for seed in SEEDS]
+        return share(["ornament" in types for types in sets], True)
+
+    assert ornament_share(4) < 0.1 < 0.4 < ornament_share(10)
+
+
+def test_layouts_follow_ease_and_cool():
+    def layouts(**dials):
+        return [template for template, _ in over_seeds(layout_for, Dials(**dials), "layout")]
+
+    assert share(layouts(ease=10), "column") > share(layouts(ease=3), "column") + 0.2
+    assert share(layouts(cool=10), "stage") > share(layouts(cool=3), "stage") + 0.15
+    assert share(layouts(chaos=10), "scatter") > share(layouts(chaos=1), "scatter")
+    mirrored = [flip for _, flip in over_seeds(layout_for, Dials(), "layout")]
+    assert 0.4 < share(mirrored, True) < 0.6
+
+
+# -- keeping parts of a look ------------------------------------------------------------------
+
+@pytest.fixture
+def current(wallpaper_set):
+    return generate(Dials(8, 6, 5, 6), wallpaper_set, 77)
+
+
+def rerolled(wallpaper_set, current, *parts):
+    return [generate(Dials(8, 6, 5, 6), wallpaper_set, seed, keep=kept_from(current, parts))
+            for seed in range(200, 225)]
+
+
+def test_keeping_nothing_changes_everything(wallpaper_set, current):
+    looks = rerolled(wallpaper_set, current)
+    assert len({look.wallpaper for look in looks}) > 1
+    assert kept_from(current, []) == Kept()
+
+
+def test_keep_wallpaper(wallpaper_set, current):
+    looks = rerolled(wallpaper_set, current, "wallpaper")
+    assert {look.wallpaper for look in looks} == {current.wallpaper}
+    assert len({look.style for look in looks}) > 5 and len({look.bar for look in looks}) > 2
+
+
+def test_keep_style_carries_colours_and_everything_derived_from_them(wallpaper_set, current):
+    for look in rerolled(wallpaper_set, current, "style"):
+        assert (look.style, look.palette, look.terminal, look.gtk_accent) == (
+            current.style, current.palette, current.terminal, current.gtk_accent)
+
+
+def test_keep_widgets_keeps_the_set_and_designs_but_places_them_anew(wallpaper_set, current):
+    def core(look):
+        return [(w.type, w.design, {k: v for k, v in w.options.items() if k not in generator.PLACEMENT_KEYS})
+                for w in look.widgets]
+
+    looks = rerolled(wallpaper_set, current, "widgets")
+    assert all(core(look) == core(current) for look in looks)
+    assert len({tuple(w.anchor for w in look.widgets) for look in looks}) > 1
+
+
+def test_keep_widgets_and_layout_freezes_the_zones(wallpaper_set, current):
+    for look in rerolled(wallpaper_set, current, "widgets", "layout"):
+        assert [(w.type, w.anchor) for w in look.widgets] == [(w.type, w.anchor) for w in current.widgets]
+        assert (look.layout, look.mirrored) == (current.layout, current.mirrored)
+
+
+def test_keep_layout_alone_keeps_the_template(wallpaper_set, current):
+    looks = rerolled(wallpaper_set, current, "layout")
+    assert {(look.layout, look.mirrored) for look in looks} == {(current.layout, current.mirrored)}
+
+
+def test_keep_bar_and_dock(wallpaper_set, current):
+    looks = rerolled(wallpaper_set, current, "bar", "dock")
+    assert {look.bar for look in looks} == {current.bar} and {look.dock for look in looks} == {current.dock}
+
+
+def test_a_kept_wallpaper_that_is_gone_is_simply_rerolled(wallpaper_set, current):
+    gone = dataclasses.replace(current, wallpaper="/walls/deleted.png")
+    look = generate(Dials(), wallpaper_set, 5, keep=kept_from(gone, ["wallpaper"]))
+    assert look.wallpaper in {w.path for w in wallpaper_set}

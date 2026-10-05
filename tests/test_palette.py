@@ -49,6 +49,17 @@ def test_warmth_dial_picks_the_matching_colour_from_a_mixed_wallpaper():
     assert palette.hue_warmth(palette.hue_of(cold)) < -0.5
 
 
+def test_seeded_palettes_still_lean_the_way_the_warmth_dial_points():
+    mixed = palette.extract_colors(two_tone((230, 140, 40), (40, 110, 230)))
+
+    def warm_share(warmth):
+        accents = [palette.build_palette(mixed, Dials(warmth=warmth), random.Random(seed)).accent
+                   for seed in range(200)]
+        return sum(palette.hue_warmth(palette.hue_of(a)) > 0 for a in accents) / len(accents)
+
+    assert warm_share(10) > 0.8 and warm_share(1) < 0.2
+
+
 def test_cool_dial_never_lowers_accent_saturation():
     colors = palette.extract_colors(two_tone((230, 140, 40), (40, 110, 230)))
     saturation = [palette.saturation_of(palette.build_palette(colors, Dials(cool=c)).accent)
@@ -57,19 +68,16 @@ def test_cool_dial_never_lowers_accent_saturation():
     assert saturation[-1] > saturation[0] + 0.4
 
 
-def test_ease_dial_never_lowers_card_opacity():
-    alphas = [palette.card_alpha(e) for e in range(1, 11)]
-    assert alphas == sorted(alphas) and alphas[0] < alphas[-1]
-
-
 @pytest.mark.parametrize("image", [solid((250, 250, 250)), solid((5, 5, 5)), noise(),
                                    two_tone((230, 140, 40), (40, 110, 230))])
-def test_text_stays_readable_on_the_card(image):
+def test_text_stays_readable_on_the_card_for_any_seed(image):
     colors = palette.extract_colors(image)
-    for dials in (Dials(1, 1, 1), Dials(10, 10, 10), Dials(5, 5, 5)):
-        made = palette.build_palette(colors, dials)
-        assert palette.contrast_ratio(made.text, made.card) >= 7
-        assert palette.contrast_ratio(made.accent, made.card) >= 4.5
+    for dials in (Dials(1, 1, 1, 1), Dials(10, 10, 10, 10), Dials()):
+        for rng in (None, *(random.Random(seed) for seed in range(25))):
+            made = palette.build_palette(colors, dials, rng)
+            made.validate()
+            assert palette.contrast_ratio(made.text, made.card) >= 7
+            assert palette.contrast_ratio(made.accent, made.card) >= 4.5
 
 
 def test_two_accents_are_visibly_different():
@@ -78,11 +86,24 @@ def test_two_accents_are_visibly_different():
         assert palette.hue_distance(palette.hue_of(made.accent), palette.hue_of(made.accent2)) >= 30
 
 
-def test_palette_without_rng_is_deterministic_and_rng_can_change_it():
+def test_without_a_seed_the_palette_is_fixed_and_seeds_vary_it():
     colors = palette.extract_colors(two_tone((230, 140, 40), (200, 60, 160)))
     assert palette.build_palette(colors, Dials()) == palette.build_palette(colors, Dials())
-    variants = {palette.build_palette(colors, Dials(), random.Random(s)).accent for s in range(1, 20)}
-    assert len(variants) == 2
+    assert (palette.build_palette(colors, Dials(), random.Random(4))
+            == palette.build_palette(colors, Dials(), random.Random(4)))
+    cards = {palette.build_palette(colors, Dials(), random.Random(s)).card for s in range(20)}
+    assert len(cards) > 10
+
+
+def test_chaos_widens_the_choice_of_accent():
+    colors = palette.extract_colors(noise(5))
+
+    def hues(chaos):
+        return {round(palette.hue_of(palette.build_palette(colors, Dials(chaos=chaos),
+                                                             random.Random(s)).accent), -1)
+                for s in range(120)}
+
+    assert len(hues(10)) >= len(hues(1))
 
 
 def test_terminal_scheme_has_sixteen_readable_colours():

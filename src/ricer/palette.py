@@ -8,7 +8,8 @@ import colorsys
 import math
 import random
 
-from ricer.look import Dials, Palette, dial_fraction
+from ricer.chance import pick
+from ricer.look import DIAL_MIN, Dials, Palette, dial_fraction
 
 COLD_HUE = 210.0                     # degrees: where warmth=1 lands when the wallpaper is grey
 HUE_SPAN = 180.0                     # warmth=10 lands at COLD_HUE + HUE_SPAN (amber, 30 degrees)
@@ -80,10 +81,6 @@ def accent_saturation(cool: int) -> float:
     return 0.35 + 0.60 * dial_fraction(cool)
 
 
-def card_alpha(ease: int) -> float:
-    return round(0.45 + 0.45 * dial_fraction(ease), 2)
-
-
 def relative_luminance(value: str) -> float:
     def channel(c):
         return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
@@ -118,36 +115,46 @@ def build_palette(colors: list[tuple[str, float]], dials: Dials,
                   rng: random.Random | None = None) -> Palette:
     """Derive the UI palette from a wallpaper's dominant colours and the dials.
 
-    `rng` is only given for shuffled variants; without it the result depends on the inputs alone.
+    Without `rng` this is the single best palette for the inputs. With it, the accents are
+    drawn from the wallpaper's good candidates with chaos-tempered odds.
     """
     warm_bias = 2 * dial_fraction(dials.warmth) - 1          # -1 cold .. +1 warm
     vivid = [(c, w) for c, w in colors
              if saturation_of(c) >= 0.18 and 0.12 <= lightness_of(c) <= 0.90]
     ranked = sorted(vivid, key=lambda item: (-_fit(item[0], item[1], warm_bias), item[0]))
+    fits = {color: _fit(color, weight, warm_bias) for color, weight in ranked}
+    steps = dials.chaos - DIAL_MIN
 
     if ranked:
-        pick = rng.randrange(min(2, len(ranked))) if rng else 0
-        accent_hue = hue_of(ranked[pick][0])
+        chosen = ranked[0][0] if rng is None else pick(
+            rng, {color: fits[color] for color, _ in ranked[:4]}, dials.chaos)
         # lean the wallpaper's own colour toward the mood the dial asks for
-        accent_hue = shift_hue_toward(accent_hue, dial_hue(dials.warmth), 0.25 * abs(warm_bias))
+        accent_hue = shift_hue_toward(hue_of(chosen), dial_hue(dials.warmth), 0.25 * abs(warm_bias))
     else:
         accent_hue = dial_hue(dials.warmth)
+        if rng is not None:
+            accent_hue = (accent_hue + rng.gauss(0, 3 + 2.5 * steps)) % 360
 
     others = [c for c, _ in ranked if hue_distance(hue_of(c), accent_hue) >= 35]
     if others:
-        accent2_hue = hue_of(others[0])
+        second = others[0] if rng is None else pick(
+            rng, {color: fits[color] for color in others[:3]}, dials.chaos)
+        accent2_hue = hue_of(second)
     else:
         # amber pairs with pink, blue pairs with violet
         accent2_hue = accent_hue + (-55 if hue_warmth(accent_hue) > 0 else 55)
 
     saturation = accent_saturation(dials.cool)
+    card_saturation, card_lightness = 0.35, 0.08
+    if rng is not None:
+        saturation = max(0.25, min(0.98, rng.gauss(saturation, 0.02 + 0.006 * steps)))
+        card_saturation, card_lightness = rng.uniform(0.22, 0.45), rng.uniform(0.065, 0.105)
     card_hue = hue_of(colors[0][0]) if colors else accent_hue
     return Palette(
         accent=hsl(accent_hue, saturation, ACCENT_LIGHTNESS),
         accent2=hsl(accent2_hue, saturation, ACCENT_LIGHTNESS + 0.02),
         text=TEXT,
-        card=hsl(card_hue, 0.35, 0.08),
-        card_alpha=card_alpha(dials.ease),
+        card=hsl(card_hue, card_saturation, card_lightness),
         hot=HOT,
     )
 

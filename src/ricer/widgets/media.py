@@ -1,7 +1,7 @@
-"""Media widget: what is playing, with previous / play-pause / next buttons.
+"""Media widget: what is playing, with controls, in three designs.
 
-`Media` only draws and hit-tests, so it can be tested offscreen. `MprisPlayer` feeds it from
-whichever MPRIS media player is active on the session bus.
+`Media` and its designs only draw and hit-test, so they can be tested offscreen.
+`MprisPlayer` feeds one from whichever MPRIS media player is active on the session bus.
 """
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import urllib.request
 
 import cairo
 
-from ricer.widgets.drawing import draw_bar, draw_card, draw_text, rounded_rect, set_accent_source
+from ricer import metrics
+from ricer.widgets.drawing import Widget, draw_bar, draw_text, rounded_rect, set_accent_source
 from ricer.widgets.style import Style
 
 MPRIS_PREFIX = "org.mpris.MediaPlayer2."
@@ -19,7 +20,6 @@ MPRIS_PATH = "/org/mpris/MediaPlayer2"
 MPRIS_IFACE = "org.mpris.MediaPlayer2.Player"
 # opened by the play button when no player is running at all
 LAUNCHERS = ("spotify_spotify.desktop", "spotify.desktop", "com.spotify.Client.desktop")
-ACTIONS = ("Previous", "PlayPause", "Next")
 
 
 def format_time(microseconds: int) -> str:
@@ -38,23 +38,39 @@ def track_lines(metadata: dict, running: bool) -> tuple[str, str]:
     return title, subtitle
 
 
-class Media:
-    clickable = True
+class Media(Widget):
+    """The full card: cover, title, artist, three buttons, times and a progress bar."""
 
-    def __init__(self, style: Style, _options: dict | None = None):
-        self.style = style
-        px = style.px
-        self.width, self.height = math.ceil(px(420)), math.ceil(px(132))
-        self.pad, self.art_size = px(16), px(100)
-        self.text_x = self.pad * 2 + self.art_size
-        self.button_y, self.button_r = px(82), px(17)
-        self.buttons = {action: self.text_x + px(18 + 46 * i) for i, action in enumerate(ACTIONS)}
+    clickable = True
+    design = "card"
+
+    def __init__(self, style: Style, options: dict | None = None):
+        super().__init__(style, options or {})
+        width, height = metrics.media_size(self.design, self.options.get("width"))
+        self.width, self.height = math.ceil(style.px(width)), math.ceil(style.px(height))
+        self.arrange(width, height)
         # state, filled in by the player
         self.running = False
         self.playing = False
         self.metadata: dict = {}
         self.position = 0
-        self.art = None                                      # GdkPixbuf, already scaled
+        self.art = None                                      # GdkPixbuf, scaled to art_size
+
+    def arrange(self, w: float, h: float) -> None:
+        """Lay the parts out for a card of logical size w x h."""
+        px = self.style.px
+        self.art_x = self.art_y = px(16)
+        self.art_size = px(100)
+        self.text_x, self.text_w = px(132), px(w - 132 - 16)
+        self.title_y, self.subtitle_y = px(14), px(37)
+        self.title_font, self.subtitle_font = self.style.ui(13, "Medium"), self.style.ui(11)
+        self.text_align = "left"
+        self.button_y, self.button_r = px(82), px(17)
+        self.buttons = {action: px(132 + 18 + 46 * index)
+                        for index, action in enumerate(("Previous", "PlayPause", "Next"))}
+        self.bar = (px(134), px(h - 18), px(w - 134 - 18), True)          # x, y, width, knob
+        # elapsed / total fits beside the buttons only on a wide card
+        self.times = (px(w - 16), px(75)) if w >= 400 else None
 
     def tick(self, _count: int) -> bool:
         return self.playing
@@ -66,12 +82,13 @@ class Media:
         return None
 
     def _draw_button(self, cr, action: str, cx: float) -> None:
-        cy, s, r = self.button_y, self.style.px(7), self.button_r
+        cy, r = self.button_y, self.button_r
+        s = r * 0.42
         if action == "PlayPause":
             cr.arc(cx, cy, r, 0, 2 * math.pi)
             set_accent_source(cr, self.style, cx - r, cx + r)
             cr.fill()
-            cr.set_source_rgba(*self.style.card[:3], 0.95)
+            cr.set_source_rgba(*self.style.card, 0.95)
             if self.playing:
                 cr.rectangle(cx - s * 0.85, cy - s, s * 0.6, 2 * s)
                 cr.rectangle(cx + s * 0.25, cy - s, s * 0.6, 2 * s)
@@ -92,42 +109,85 @@ class Media:
         cr.rectangle(cx + d * s * 0.7 - s * 0.2, cy - s, s * 0.4, 2 * s)
         cr.fill()
 
-    def draw(self, cr) -> None:
-        style, pad, art = self.style, self.pad, self.art_size
-        draw_card(cr, style, self.width, self.height)
-
-        rounded_rect(cr, pad, pad, art, art, style.px(12))
+    def _draw_art(self, cr) -> None:
+        style, x, y, size = self.style, self.art_x, self.art_y, self.art_size
+        rounded_rect(cr, x, y, size, size, min(style.radius * 0.75, size / 2))
         if self.art is not None:
             import gi
             gi.require_version("Gdk", "3.0")
             from gi.repository import Gdk
             cr.save()
             cr.clip()
-            Gdk.cairo_set_source_pixbuf(cr, self.art, pad, pad)
+            Gdk.cairo_set_source_pixbuf(cr, self.art, x, y)
             cr.paint()
             cr.restore()
         else:
-            placeholder = cairo.LinearGradient(pad, pad, pad + art, pad + art)
+            placeholder = cairo.LinearGradient(x, y, x + size, y + size)
             placeholder.add_color_stop_rgba(0, *style.accent2, 0.55)
             placeholder.add_color_stop_rgba(1, *style.accent, 0.55)
             cr.set_source(placeholder)
             cr.fill()
 
-        x, text_w = self.text_x, self.width - self.text_x - pad
+    def draw(self, cr) -> None:
+        style = self.style
+        self.draw_card(cr)
+        self._draw_art(cr)
         title, subtitle = track_lines(self.metadata, self.running)
-        draw_text(cr, title, style.font_desc(13, "Medium"), x, style.px(14), style.text, width=text_w)
-        draw_text(cr, subtitle, style.font_desc(11), x, style.px(37), style.text, alpha=0.70,
-                  width=text_w)
+        anchor = self.text_x + (self.text_w / 2 if self.text_align == "center" else 0)
+        draw_text(cr, title, self.title_font, anchor, self.title_y, style.text, width=self.text_w,
+                  align=self.text_align, shadow=self.bare)
+        draw_text(cr, subtitle, self.subtitle_font, anchor, self.subtitle_y, style.text, alpha=0.70,
+                  width=self.text_w, align=self.text_align, shadow=self.bare)
         for action, bx in self.buttons.items():
             self._draw_button(cr, action, bx)
 
         length = self.metadata.get("mpris:length") or 0
-        if length:
-            draw_text(cr, f"{format_time(self.position)} / {format_time(length)}",
-                      style.font_desc(9), self.width - pad, self.button_y - style.px(7),
-                      style.text, alpha=0.65, align="right")
-        draw_bar(cr, style, x + 2, self.height - pad - 2, text_w - 4,
-                 self.position / length if length else 0, knob=bool(length))
+        if length and self.times:
+            draw_text(cr, f"{format_time(self.position)} / {format_time(length)}", style.ui(9),
+                      *self.times, style.text, alpha=0.65, align="right", shadow=self.bare)
+        x, y, width, knob = self.bar
+        draw_bar(cr, style, x, y, width, self.position / length if length else 0,
+                 knob=knob and bool(length), line_width=3 if knob else 2)
+
+
+class MediaPill(Media):
+    """A small strip: cover, title, artist, play and next."""
+
+    design = "pill"
+
+    def arrange(self, w: float, h: float) -> None:
+        px = self.style.px
+        self.art_x = self.art_y = px(10)
+        self.art_size = px(48)
+        self.text_x, self.text_w = px(70), px(w - 70 - 96)
+        self.title_y, self.subtitle_y = px(13), px(34)
+        self.title_font, self.subtitle_font = self.style.ui(12, "Medium"), self.style.ui(10)
+        self.text_align = "left"
+        self.button_y, self.button_r = px(h / 2), px(15)
+        self.buttons = {"PlayPause": px(w - 68), "Next": px(w - 28)}
+        self.bar = (px(70), px(h - 7), px(w - 70 - 96), False)
+        self.times = None
+
+
+class MediaCover(Media):
+    """Big cover art on top, the track and controls underneath."""
+
+    design = "cover"
+
+    def arrange(self, w: float, h: float) -> None:
+        px = self.style.px
+        art = w - 32
+        self.art_x = self.art_y = px(16)
+        self.art_size = px(art)
+        self.text_x, self.text_w = px(16), px(art)
+        self.title_y, self.subtitle_y = px(16 + art + 10), px(16 + art + 33)
+        self.title_font, self.subtitle_font = self.style.ui(13, "Medium"), self.style.ui(11)
+        self.text_align = "center"
+        self.button_y, self.button_r = px(16 + art + 84), px(17)
+        self.buttons = {action: px(w / 2 + 48 * (index - 1))
+                        for index, action in enumerate(("Previous", "PlayPause", "Next"))}
+        self.bar = (px(18), px(16 + art + 60), px(art - 4), True)
+        self.times = None
 
 
 def choose_player(statuses: dict[str, str], current: str | None) -> str | None:
@@ -154,8 +214,9 @@ class MprisPlayer:
         self.proxies: dict = {}
         self.current: str | None = None
         self.art_url: str | None = None
+        self.closed = False
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION)
-        self.bus.signal_subscribe(
+        self._subscription = self.bus.signal_subscribe(
             "org.freedesktop.DBus", "org.freedesktop.DBus", "NameOwnerChanged",
             "/org/freedesktop/DBus", None, Gio.DBusSignalFlags.NONE, self._on_name_owner)
         names = self.bus.call_sync(
@@ -165,6 +226,12 @@ class MprisPlayer:
             if name.startswith(MPRIS_PREFIX):
                 self._add(name)
         self.refresh()
+
+    def close(self) -> None:
+        """Stop listening. Without this a reloaded daemon keeps every old player alive."""
+        self.closed = True
+        self.bus.signal_unsubscribe(self._subscription)
+        self.proxies.clear()
 
     # -- tracking players -----------------------------------------------
     def _add(self, name: str) -> None:
@@ -190,6 +257,8 @@ class MprisPlayer:
         return value.unpack() if value is not None else None
 
     def refresh(self) -> None:
+        if self.closed:
+            return
         statuses = {name: self._prop(proxy, "PlaybackStatus") for name, proxy in self.proxies.items()}
         self.current = choose_player(statuses, self.current)
         proxy = self.proxies.get(self.current)
@@ -214,7 +283,7 @@ class MprisPlayer:
         self._glib.idle_add(self._set_art, url, data)
 
     def _set_art(self, url: str, data: bytes) -> bool:
-        if url != self.art_url:
+        if self.closed or url != self.art_url:
             return False
         try:
             loader = self._pixbuf.PixbufLoader()
@@ -245,7 +314,8 @@ class MprisPlayer:
             self.media.position = proxy.call_finish(result).unpack()[0]
         except self._glib.Error:
             return
-        self.redraw()
+        if not self.closed:
+            self.redraw()
 
     def press(self, action: str) -> None:
         proxy = self.proxies.get(self.current)
@@ -263,3 +333,6 @@ class MprisPlayer:
             if app is not None:
                 app.launch([], None)
                 return
+
+
+DESIGNS = {"card": Media, "pill": MediaPill, "cover": MediaCover}

@@ -1,4 +1,4 @@
-"""System widget: a card of thin bars for CPU, memory, temperatures and battery."""
+"""System widget: CPU, memory, temperatures and battery, in three designs."""
 from __future__ import annotations
 
 import math
@@ -6,7 +6,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ricer.widgets.drawing import draw_bar, draw_card, draw_text
+import cairo
+
+from ricer import metrics
+from ricer.widgets.drawing import Widget, draw_rows, draw_text, measure_text, set_accent_source
 from ricer.widgets.style import Style
 
 CPU_SENSORS = ("coretemp", "k10temp", "zenpower")   # hwmon driver names for CPU temperature
@@ -14,7 +17,7 @@ GPU_SENSORS = ("amdgpu", "nouveau")                 # GPUs that report through h
 TEMP_RANGE = (30, 100)               # °C mapped to an empty / full temperature bar
 TEMP_HOT = 85                        # °C at which a reading turns red
 GPU_POLL_TICKS = 6                   # asking nvidia-smi is slow-ish, so do it less often
-LABELS = {"cpu": "CPU", "ram": "RAM", "temp": "TEMP", "gpu": "GPU", "battery": "BAT"}
+LABELS = {"cpu": "CPU", "ram": "RAM", "temp": "Temp", "gpu": "GPU", "battery": "Bat"}
 
 
 def read_cpu_times(root: Path = Path("/")) -> tuple[int, int]:
@@ -78,12 +81,13 @@ def temperature_fraction(celsius: float) -> float:
     return (celsius - low) / (high - low)
 
 
-class System:
-    clickable = False
-    WIDTH = 260
+class System(Widget):
+    """The bars design, and the readings every design shares."""
+
+    design = "bars"
 
     def __init__(self, style: Style, options: dict, root: Path = Path("/")):
-        self.style = style
+        super().__init__(style, options)
         self.root = root
         self.cpu = 0.0
         self.gpu = None
@@ -93,11 +97,11 @@ class System:
             self.gpu = gpu_temperature(root)
         # a row whose sensor this machine lacks is dropped rather than shown empty
         self.rows = [row for row in wanted if self.reading(row) is not None]
-        self.width = math.ceil(style.px(self.WIDTH))
-        self.height = math.ceil(style.px(36 + 32 * len(self.rows)))
+        width, height = metrics.system_size(self.design, len(self.rows), options.get("width"))
+        self.width, self.height = math.ceil(style.px(width)), math.ceil(style.px(height))
 
     def reading(self, row: str):
-        """(bar fraction, label text, is hot) for a row, or None if it cannot be read."""
+        """(bar fraction, value text, is hot) for a row, or None if it cannot be read."""
         if row == "cpu":
             return self.cpu, f"{round(self.cpu * 100)}%", False
         if row == "ram":
@@ -111,6 +115,15 @@ class System:
         level = battery_level(self.root)
         return None if level is None else (level, f"{round(level * 100)}%", False)
 
+    def readings(self) -> list[tuple[str, float, str, bool]]:
+        """(label, fraction, value text, is hot) for every row that can be read right now."""
+        found = []
+        for row in self.rows:
+            reading = self.reading(row)
+            if reading is not None:
+                found.append((LABELS[row], *reading))
+        return found
+
     def tick(self, count: int) -> bool:
         if count % 2:
             return False
@@ -121,19 +134,65 @@ class System:
         return True
 
     def draw(self, cr) -> None:
-        style = self.style
-        draw_card(cr, style, self.width, self.height)
-        pad, step = style.px(18), style.px(32)
-        small = style.font_desc(9)
-        for index, row in enumerate(self.rows):
-            reading = self.reading(row)
-            if reading is None:
-                continue
-            frac, text, hot = reading
-            y = pad + step * index + step / 2
-            draw_text(cr, LABELS[row], small, pad, y - style.px(8), style.text, alpha=0.70,
-                      spacing=2)
-            draw_text(cr, text, small, self.width - pad, y - style.px(8),
-                      style.hot if hot else style.text, alpha=0.90, align="right")
-            draw_bar(cr, style, pad + style.px(46), y, self.width - 2 * pad - style.px(90), frac,
-                     line_width=style.px(4))
+        self.draw_card(cr)
+        draw_rows(cr, self.style, self.readings(), self.width, self.bare)
+
+
+class SystemRings(System):
+    """A row of ring gauges, each with its value in the middle."""
+
+    design = "rings"
+
+    def draw(self, cr) -> None:
+        style, px = self.style, self.style.px
+        self.draw_card(cr)
+        readings = self.readings()
+        if not readings:
+            return
+        pad = px(metrics.PAD)
+        slot = (self.width - 2 * pad) / len(readings)
+        radius = min(px(26), slot / 2 - px(5))
+        cy = px(16) + px(26)
+        cr.set_line_cap(cairo.LINE_CAP_ROUND)
+        for index, (label, frac, text, hot) in enumerate(readings):
+            cx = pad + slot * (index + 0.5)
+            cr.set_line_width(px(4.5))
+            cr.set_source_rgba(*style.text, 0.18)
+            cr.arc(cx, cy, radius, 0, 2 * math.pi)
+            cr.stroke()
+            frac = max(0.0, min(1.0, frac))
+            if frac > 0:
+                if hot:
+                    cr.set_source_rgba(*style.hot, 0.95)
+                else:
+                    set_accent_source(cr, style, cx - radius, cx + radius)
+                cr.arc(cx, cy, radius, -math.pi / 2, -math.pi / 2 + 2 * math.pi * frac)
+                cr.stroke()
+            value = text.replace("°C", "°")                  # no room for the unit inside a ring
+            value_font = style.ui(10, "Medium")
+            draw_text(cr, value, value_font, cx, cy - measure_text(value, value_font)[1] / 2,
+                      style.hot if hot else style.text, align="center", shadow=self.bare)
+            draw_text(cr, style.label(label), style.ui(9), cx, px(84), style.text, alpha=0.70,
+                      spacing=style.label_spacing, align="center", shadow=self.bare)
+
+
+class SystemLine(System):
+    """One line: CPU 3%  RAM 51%  Temp 62°C. Small and out of the way."""
+
+    design = "line"
+
+    def draw(self, cr) -> None:
+        style, px = self.style, self.style.px
+        self.draw_card(cr)
+        label_font, value_font = style.ui(9), style.ui(11, "Medium")
+        text_h = measure_text("0", value_font)[1]
+        y = (self.height - text_h) / 2
+        for index, (label, _frac, text, hot) in enumerate(self.readings()):
+            x = px(14) + px(98) * index
+            w, _ = draw_text(cr, style.label(label), label_font, x, y + px(2), style.text, alpha=0.62,
+                             spacing=style.label_spacing, shadow=self.bare)
+            draw_text(cr, text, value_font, x + w + px(7), y, style.hot if hot else style.text,
+                      shadow=self.bare)
+
+
+DESIGNS = {"bars": System, "rings": SystemRings, "line": SystemLine}

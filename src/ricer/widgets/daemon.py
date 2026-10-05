@@ -18,38 +18,22 @@ from gi.repository import Gdk, Gio, GLib, Gtk
 
 from ricer.daemonctl import process_is_daemon
 from ricer.paths import Paths
-from ricer.widgets.clock import Clock
+from ricer.placement import arrange
+from ricer.widgets.catalog import build
 from ricer.widgets.media import Media, MprisPlayer
 from ricer.widgets.style import Style
-from ricer.widgets.system import System
 
-MARGIN = 40                          # px gap between a widget and the screen edge
-TOP_OFFSET = 26                      # px gap below the top bar
 RELOAD_DELAY_MS = 200                # let a config write finish before reading it
-WIDGETS = {"clock": Clock, "media": Media, "system": System}
-
-
-def position(anchor: str, geo, width: int, height: int) -> tuple[int, int]:
-    """Top-left corner for a widget of the given size at `anchor` inside the area `geo`."""
-    vertical, horizontal = anchor.split("-")
-    if horizontal == "left":
-        x = geo.x + MARGIN
-    elif horizontal == "right":
-        x = geo.x + geo.width - width - MARGIN
-    else:
-        x = geo.x + (geo.width - width) // 2
-    y = geo.y + TOP_OFFSET if vertical == "top" else geo.y + geo.height - height - MARGIN
-    return x, y
 
 
 class DesktopWindow(Gtk.Window):
     """Borderless transparent window on the desktop layer that shows one widget."""
 
-    def __init__(self, widget, anchor: str, on_click=None):
+    def __init__(self, widget, kind: str, anchor: str, on_click=None):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
         # not "self.widget": GtkWindow already has a read-only field of that name
         self.content, self.anchor, self.on_click = widget, anchor, on_click
-        self.set_title(f"ricer-{type(widget).__name__.lower()}")
+        self.set_title(f"ricer-{kind}")
         self.set_decorated(False)
         self.set_app_paintable(True)
         self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
@@ -58,32 +42,33 @@ class DesktopWindow(Gtk.Window):
         self.set_skip_pager_hint(True)
         self.set_accept_focus(False)
         self.stick()
-        self.set_default_size(widget.width, widget.height)
+        self._size = (widget.width, widget.height)
+        self._spot = None
+        self.set_default_size(*self._size)
 
-        screen = self.get_screen()
-        visual = screen.get_rgba_visual()
+        visual = self.get_screen().get_rgba_visual()
         if visual is not None:
             self.set_visual(visual)
 
         self.connect("draw", self._draw)
         self.connect("realize", self._realize)
-        self._placed = None
-        self._monitors_handler = screen.connect("monitors-changed", lambda *_: self.place())
-        self.connect("destroy", lambda *_: screen.disconnect(self._monitors_handler))
         if widget.clickable:
             self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK)
             self.connect("button-press-event", self._press)
-        self.place()
 
-    def place(self) -> None:
-        display = Gdk.Display.get_default()
-        monitor = display.get_primary_monitor() or display.get_monitor(0)
-        # the work area excludes the top bar and an always-visible dock
-        target = position(self.anchor, monitor.get_workarea(),
-                          self.content.width, self.content.height)
-        if target != self._placed:
-            self._placed = target
-            self.move(*target)
+    def sync_size(self) -> bool:
+        """Follow the widget if it changed size (a calendar gaining a row). True if it did."""
+        size = (self.content.width, self.content.height)
+        if size == self._size:
+            return False
+        self._size = size
+        self.resize(*size)
+        return True
+
+    def move_to(self, spot: tuple[int, int]) -> None:
+        if spot != self._spot:
+            self._spot = spot
+            self.move(*spot)
 
     def _realize(self, _window) -> None:
         if not self.content.clickable:
@@ -109,11 +94,13 @@ class Daemon:
         self.paths = paths
         self.windows: list[DesktopWindow] = []
         self.players: list[MprisPlayer] = []
+        self.insets = (0, 0, 0)
         self.ticks = 0
         self._reload_source = 0
         config = Gio.File.new_for_path(str(paths.widgets_file))
         self.monitor = config.monitor_file(Gio.FileMonitorFlags.NONE, None)
         self.monitor.connect("changed", self._config_changed)
+        Gdk.Screen.get_default().connect("monitors-changed", lambda *_: self.layout())
         self.rebuild()
         GLib.timeout_add(1000, self._tick)
 
@@ -129,28 +116,46 @@ class Daemon:
 
     def rebuild(self) -> None:
         """Throw away every window and build the set the config asks for."""
+        for player in self.players:
+            player.close()
         for window in self.windows:
             window.destroy()
         self.windows, self.players = [], []
         try:
             config = json.loads(self.paths.widgets_file.read_text())
             style = Style.from_config(config)
-        except (OSError, ValueError, KeyError) as error:
+            self.insets = tuple(config.get("insets", (0, 0, 0)))
+        except (OSError, ValueError, KeyError, TypeError) as error:
             print(f"ricer widgets: cannot read {self.paths.widgets_file}: {error}", file=sys.stderr)
             return
         for spec in config.get("widgets", []):
             try:
-                widget = WIDGETS[spec["type"]](style, spec.get("options", {}))
+                widget = build(style, spec)
             except Exception as error:                       # one bad widget must not sink the rest
                 print(f"ricer widgets: skipping {spec.get('type')}: {error}", file=sys.stderr)
                 continue
-            window = DesktopWindow(widget, spec["anchor"])
+            window = DesktopWindow(widget, spec["type"], spec["anchor"])
             if isinstance(widget, Media):
                 player = MprisPlayer(widget, window.queue_draw)
                 window.on_click = lambda x, y, w=widget, p=player: self._media_click(w, p, x, y)
                 self.players.append(player)
             self.windows.append(window)
+        self.layout()
+        for window in self.windows:
             window.show_all()
+
+    def layout(self) -> None:
+        """Put every window in its zone of the primary monitor's work area."""
+        if not self.windows:
+            return
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        # the work area excludes the top bar and an always-visible dock
+        area = monitor.get_workarea()
+        items = [(window.anchor, window.content.width, window.content.height) for window in self.windows]
+        spots = arrange(items, (area.x, area.y, area.width, area.height), self.insets)
+        for window, spot in zip(self.windows, spots):
+            window.move_to(spot)
 
     @staticmethod
     def _media_click(widget: Media, player: MprisPlayer, x: float, y: float) -> bool:
@@ -164,11 +169,12 @@ class Daemon:
         for player in self.players:
             player.poll_position()
         for window in self.windows:
-            # GTK does not announce work-area changes (a dock starting or ceasing to hide),
-            # so re-check the position each tick; it only moves when the target changed
-            window.place()
             if window.content.tick(self.ticks):
+                window.sync_size()
                 window.queue_draw()
+        # GTK does not announce work-area changes (a dock starting or ceasing to hide), so the
+        # layout is re-checked each tick; windows only move when their spot changed
+        self.layout()
         return True
 
 

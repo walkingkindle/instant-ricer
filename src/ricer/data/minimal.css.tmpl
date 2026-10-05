@@ -1,34 +1,24 @@
 
-/* top bar: a transparent strip holding three floating cards */
+/* top bar: no background at all, just text over the wallpaper */
 #panel {
   background-color: transparent;
-  height: ${panel_height}px;
-  font-weight: 500;
+  height: ${slim_height}px;
+  font-weight: 600;
 }
 #panel:overview, #panel.unlock-screen, #panel.login-screen {
   background-color: transparent;
 }
-#panelLeft, #panelCenter, #panelRight {
-  background-color: rgba($card_rgb, $bar_alpha);
-  border: 1px solid $border;
-  border-radius: ${radius}px;
-  margin-top: 7px;
-  margin-bottom: 3px;
-  padding: 0 4px;
-}
-#panelLeft { margin-left: 12px; }
-#panelRight { margin-right: 12px; }
-
 #panel .panel-button {
   color: $text;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
   border-radius: ${button_radius}px;
-  margin: 3px 1px;
   box-shadow: none;
   background-color: transparent;
 }
+#panel .panel-button .system-status-icon { icon-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 #panel .panel-button:hover {
   box-shadow: none;
-  background-color: rgba(255, 255, 255, 0.10);
+  background-color: rgba(255, 255, 255, 0.12);
 }
 #panel .panel-button:active, #panel .panel-button:checked,
 #panel .panel-button:overview, #panel .panel-button:focus {

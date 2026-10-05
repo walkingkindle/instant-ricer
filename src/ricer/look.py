@@ -1,6 +1,8 @@
-"""The Look: a complete, plain-data description of a desktop style.
+"""The Look: a complete, plain-data description of one desktop style.
 
-The generator produces a Look, the engine applies one. Nothing in here touches the desktop.
+This is the contract of the whole tool. The generator writes a Look, the engine applies one,
+and anything else that can produce this structure (a GUI, an AI art director) can drive the
+desktop the same way. Nothing in here touches the desktop.
 """
 from __future__ import annotations
 
@@ -8,16 +10,52 @@ import re
 from dataclasses import asdict, dataclass, field
 
 DIAL_MIN, DIAL_MAX = 1, 10
-BAR_STYLES = ("cards", "solid", "stock")
+DIAL_NAMES = ("cool", "ease", "warmth", "chaos")
+
+BAR_STYLES = ("stock", "minimal", "island", "cards", "solid")
+BAR_SIDES = ("left", "center", "right")
+BAR_STATS = ("cpu", "ram", "temp", "net", "battery")
 DOCK_POSITIONS = ("BOTTOM", "LEFT", "RIGHT")
-WIDGET_TYPES = ("clock", "media", "system")
-ANCHORS = ("top-left", "top-center", "top-right", "bottom-left", "bottom-right")
+DOCK_INDICATORS = ("DOTS", "SQUARES", "DASHES", "SEGMENTED", "SOLID", "CILIORA", "METRO")
+BORDERS = ("none", "hairline", "accent")
+VOICES = ("ui", "condensed", "mono", "serif", "geometric")
+ICON_STYLES = ("stock", "fancy")
+LAYOUTS = ("corners", "column", "stage", "scatter")
+ANCHORS = ("top-left", "top-center", "top-right", "left", "center", "right",
+           "bottom-left", "bottom-center", "bottom-right")
+# every desktop widget type and the designs it can be drawn in
+DESIGNS = {
+    "clock": ("digital", "stacked", "analog", "words"),
+    "greeting": ("plain",),
+    "calendar": ("month", "week", "day"),
+    "media": ("card", "pill", "cover"),
+    "system": ("bars", "rings", "line"),
+    "progress": ("bars",),
+    "ornament": ("orbits", "sigil", "skyline"),
+}
+WIDGET_TYPES = tuple(DESIGNS)
 SYSTEM_ROWS = ("cpu", "ram", "temp", "gpu", "battery")
+PROGRESS_ROWS = ("day", "week", "month", "year")
+KEEP_PARTS = ("wallpaper", "style", "widgets", "layout", "bar", "dock")
 _HEX = re.compile(r"^#[0-9a-f]{6}$")
 
 
 class LookError(ValueError):
     """A Look (or a dial) holds a value that makes no sense."""
+
+
+def _require(condition: bool, message: str) -> None:
+    if not condition:
+        raise LookError(message)
+
+
+def _one_of(name: str, value, allowed) -> None:
+    _require(value in allowed, f"{name} must be one of {tuple(allowed)}, got {value!r}")
+
+
+def _within(name: str, value, low: float, high: float) -> None:
+    _require(isinstance(value, (int, float)) and not isinstance(value, bool)
+             and low <= value <= high, f"{name} must be within {low}..{high}, got {value!r}")
 
 
 def dial_fraction(value: int) -> float:
@@ -27,17 +65,18 @@ def dial_fraction(value: int) -> float:
 
 @dataclass(frozen=True)
 class Dials:
-    cool: int = 5
-    ease: int = 5
-    warmth: int = 5
+    cool: int = 5                    # flashiness: calm and minimal .. loud and flashy
+    ease: int = 5                    # practicality: looks first .. usability first
+    warmth: int = 5                  # mood: cold blues .. warm ambers
+    chaos: int = 5                   # how far a run may stray from what the others suggest
 
     def validate(self) -> None:
-        for name in ("cool", "ease", "warmth"):
+        for name in DIAL_NAMES:
             value = getattr(self, name)
-            if isinstance(value, bool) or not isinstance(value, int):
-                raise LookError(f"{name} must be a whole number, got {value!r}")
-            if not DIAL_MIN <= value <= DIAL_MAX:
-                raise LookError(f"{name} must be between {DIAL_MIN} and {DIAL_MAX}, got {value}")
+            _require(isinstance(value, int) and not isinstance(value, bool),
+                     f"{name} must be a whole number, got {value!r}")
+            _require(DIAL_MIN <= value <= DIAL_MAX,
+                     f"{name} must be between {DIAL_MIN} and {DIAL_MAX}, got {value}")
 
 
 @dataclass(frozen=True)
@@ -46,16 +85,50 @@ class Palette:
     accent2: str
     text: str
     card: str
-    card_alpha: float
     hot: str
 
     def validate(self) -> None:
         for name in ("accent", "accent2", "text", "card", "hot"):
             value = getattr(self, name)
-            if not isinstance(value, str) or not _HEX.match(value):
-                raise LookError(f"palette.{name} must be a #rrggbb colour, got {value!r}")
-        if not 0.0 <= self.card_alpha <= 1.0:
-            raise LookError(f"palette.card_alpha must be within 0..1, got {self.card_alpha}")
+            _require(isinstance(value, str) and bool(_HEX.match(value)),
+                     f"palette.{name} must be a #rrggbb colour, got {value!r}")
+
+
+@dataclass(frozen=True)
+class Style:
+    """Traits shared by every part of a look, so the desktop matches itself."""
+    radius: int = 16                 # px: corners of cards, bar pieces and menus
+    fill: float = 0.58               # opacity of the card behind widgets; 0 means no card
+    border: str = "hairline"
+    weight: float = 0.3              # display text: 0 thin .. 1 heavy
+    voice: str = "ui"                # typeface role for display text
+    caps: bool = True                # small labels in spaced capitals
+    gradient: bool = True            # accents run from accent to accent2
+    scale: float = 1.0               # size multiplier for text and widgets
+
+    def validate(self) -> None:
+        _within("style.radius", self.radius, 0, 40)
+        _within("style.fill", self.fill, 0.0, 1.0)
+        _one_of("style.border", self.border, BORDERS)
+        _within("style.weight", self.weight, 0.0, 1.0)
+        _one_of("style.voice", self.voice, VOICES)
+        _within("style.scale", self.scale, 0.5, 2.0)
+
+
+@dataclass(frozen=True)
+class Bar:
+    style: str = "cards"
+    stats: tuple[str, ...] = ()      # sensors shown in the bar; empty means none
+    stats_side: str = "right"
+    media: bool = False              # now playing, with controls, in the bar
+    media_side: str = "left"
+
+    def validate(self) -> None:
+        _one_of("bar.style", self.style, BAR_STYLES)
+        _require(all(s in BAR_STATS for s in self.stats) and len(set(self.stats)) == len(self.stats),
+                 f"bar.stats must be distinct members of {BAR_STATS}, got {self.stats!r}")
+        _one_of("bar.stats_side", self.stats_side, BAR_SIDES)
+        _one_of("bar.media_side", self.media_side, BAR_SIDES)
 
 
 @dataclass(frozen=True)
@@ -65,32 +138,35 @@ class Dock:
     floating: bool = True
     opacity: float = 0.3
     icon_size: int = 44
+    indicator: str = "DOTS"
+    tint: bool = False               # colour the dock like the cards
 
     def validate(self) -> None:
-        if self.position not in DOCK_POSITIONS:
-            raise LookError(f"dock.position must be one of {DOCK_POSITIONS}, got {self.position!r}")
-        if not 0.0 <= self.opacity <= 1.0:
-            raise LookError(f"dock.opacity must be within 0..1, got {self.opacity}")
-        if not 16 <= self.icon_size <= 128:
-            raise LookError(f"dock.icon_size must be within 16..128, got {self.icon_size}")
+        _one_of("dock.position", self.position, DOCK_POSITIONS)
+        _within("dock.opacity", self.opacity, 0.0, 1.0)
+        _within("dock.icon_size", self.icon_size, 16, 128)
+        _one_of("dock.indicator", self.indicator, DOCK_INDICATORS)
 
 
 @dataclass(frozen=True)
 class WidgetSpec:
     type: str
+    design: str
     anchor: str
     options: dict = field(default_factory=dict)
 
     def validate(self) -> None:
-        if self.type not in WIDGET_TYPES:
-            raise LookError(f"widget type must be one of {WIDGET_TYPES}, got {self.type!r}")
-        if self.anchor not in ANCHORS:
-            raise LookError(f"widget anchor must be one of {ANCHORS}, got {self.anchor!r}")
+        _one_of("widget type", self.type, WIDGET_TYPES)
+        _one_of(f"{self.type} design", self.design, DESIGNS[self.type])
+        _one_of("widget anchor", self.anchor, ANCHORS)
+        rows, allowed = self.options.get("rows"), None
         if self.type == "system":
-            rows = self.options.get("rows", [])
-            unknown = [row for row in rows if row not in SYSTEM_ROWS]
-            if not rows or unknown:
-                raise LookError(f"system widget rows must be a non-empty subset of {SYSTEM_ROWS}")
+            allowed = SYSTEM_ROWS
+        elif self.type == "progress":
+            allowed = PROGRESS_ROWS
+        if allowed:
+            _require(bool(rows) and all(row in allowed for row in rows),
+                     f"{self.type} widget rows must be a non-empty subset of {allowed}")
 
 
 @dataclass(frozen=True)
@@ -99,32 +175,31 @@ class Look:
     seed: int
     wallpaper: str
     palette: Palette
+    style: Style
     gtk_accent: str
-    bar_style: str
-    gradient: bool
+    icon_style: str
+    desktop_icons: bool
+    bar: Bar
     blur: bool
     dock: Dock
-    widget_scale: float
     terminal: dict
+    layout: str                      # the template the placement was biased by
+    mirrored: bool                   # template flipped left to right
     widgets: tuple[WidgetSpec, ...] = ()
 
     def validate(self) -> None:
         self.dials.validate()
         self.palette.validate()
+        self.style.validate()
+        self.bar.validate()
         self.dock.validate()
-        if not self.wallpaper:
-            raise LookError("look has no wallpaper")
-        if self.bar_style not in BAR_STYLES:
-            raise LookError(f"bar_style must be one of {BAR_STYLES}, got {self.bar_style!r}")
-        if not 0.5 <= self.widget_scale <= 2.0:
-            raise LookError(f"widget_scale must be within 0.5..2, got {self.widget_scale}")
+        _require(bool(self.wallpaper), "look has no wallpaper")
+        _one_of("icon_style", self.icon_style, ICON_STYLES)
+        _one_of("layout", self.layout, LAYOUTS)
         colours = [self.terminal.get("background"), self.terminal.get("foreground"),
                    *self.terminal.get("palette", [])]
-        if len(colours) != 18 or not all(isinstance(c, str) and _HEX.match(c) for c in colours):
-            raise LookError("terminal needs a background, a foreground and 16 palette colours")
-        anchors = [widget.anchor for widget in self.widgets]
-        if len(anchors) != len(set(anchors)):
-            raise LookError("two widgets share the same anchor")
+        _require(len(colours) == 18 and all(isinstance(c, str) and _HEX.match(c) for c in colours),
+                 "terminal needs a background, a foreground and 16 palette colours")
         for widget in self.widgets:
             widget.validate()
 
@@ -133,17 +208,26 @@ class Look:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Look":
-        return cls(
-            dials=Dials(**data["dials"]),
-            seed=data["seed"],
-            wallpaper=data["wallpaper"],
-            palette=Palette(**data["palette"]),
-            gtk_accent=data["gtk_accent"],
-            bar_style=data["bar_style"],
-            gradient=data["gradient"],
-            blur=data["blur"],
-            dock=Dock(**data["dock"]),
-            widget_scale=data["widget_scale"],
-            terminal=data["terminal"],
-            widgets=tuple(WidgetSpec(**widget) for widget in data["widgets"]),
-        )
+        """Rebuild a Look from `to_dict()` output. Raises LookError for other shapes."""
+        try:
+            bar = dict(data["bar"])
+            bar["stats"] = tuple(bar.get("stats", ()))
+            return cls(
+                dials=Dials(**data["dials"]),
+                seed=data["seed"],
+                wallpaper=data["wallpaper"],
+                palette=Palette(**data["palette"]),
+                style=Style(**data["style"]),
+                gtk_accent=data["gtk_accent"],
+                icon_style=data["icon_style"],
+                desktop_icons=data["desktop_icons"],
+                bar=Bar(**bar),
+                blur=data["blur"],
+                dock=Dock(**data["dock"]),
+                terminal=data["terminal"],
+                layout=data["layout"],
+                mirrored=data["mirrored"],
+                widgets=tuple(WidgetSpec(**widget) for widget in data["widgets"]),
+            )
+        except (KeyError, TypeError) as error:
+            raise LookError(f"not a look this version understands: {error}") from error
