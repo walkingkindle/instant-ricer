@@ -1,0 +1,37 @@
+
+/* top bar: transparent strip with three floating cards */
+#panel {
+  background-color: transparent;
+  height: ${panel_height}px;
+  font-weight: 500;
+}
+#panel:overview, #panel.unlock-screen, #panel.login-screen {
+  background-color: transparent;
+}
+#panelLeft, #panelCenter, #panelRight {
+  background-color: rgba($card_rgb, $card_alpha);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 16px;
+  margin-top: 7px;
+  margin-bottom: 3px;
+  padding: 0 4px;
+}
+#panelLeft { margin-left: 12px; }
+#panelRight { margin-right: 12px; }
+
+#panel .panel-button {
+  color: $text;
+  border-radius: 12px;
+  margin: 3px 1px;
+  box-shadow: none;
+  background-color: transparent;
+}
+#panel .panel-button:hover {
+  box-shadow: none;
+  background-color: rgba(255, 255, 255, 0.10);
+}
+#panel .panel-button:active, #panel .panel-button:checked,
+#panel .panel-button:overview, #panel .panel-button:focus {
+  box-shadow: none;
+  background-color: rgba($accent2_rgb, 0.28);
+}
