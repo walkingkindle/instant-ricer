@@ -67,6 +67,7 @@ class DesktopWindow(Gtk.Window):
 
         self.connect("draw", self._draw)
         self.connect("realize", self._realize)
+        self._placed = None
         self._monitors_handler = screen.connect("monitors-changed", lambda *_: self.place())
         self.connect("destroy", lambda *_: screen.disconnect(self._monitors_handler))
         if widget.clickable:
@@ -78,8 +79,11 @@ class DesktopWindow(Gtk.Window):
         display = Gdk.Display.get_default()
         monitor = display.get_primary_monitor() or display.get_monitor(0)
         # the work area excludes the top bar and an always-visible dock
-        self.move(*position(self.anchor, monitor.get_workarea(),
-                            self.content.width, self.content.height))
+        target = position(self.anchor, monitor.get_workarea(),
+                          self.content.width, self.content.height)
+        if target != self._placed:
+            self._placed = target
+            self.move(*target)
 
     def _realize(self, _window) -> None:
         if not self.content.clickable:
@@ -160,6 +164,9 @@ class Daemon:
         for player in self.players:
             player.poll_position()
         for window in self.windows:
+            # GTK does not announce work-area changes (a dock starting or ceasing to hide),
+            # so re-check the position each tick; it only moves when the target changed
+            window.place()
             if window.content.tick(self.ticks):
                 window.queue_draw()
         return True
