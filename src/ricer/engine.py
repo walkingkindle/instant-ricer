@@ -13,7 +13,7 @@ from ricer.backends import gv, gv_uint
 from ricer.capabilities import MEDIA_CONTROLS_UUID, RICER_UUID, VITALS_UUID, Capabilities
 from ricer.compose import remember
 from ricer.look import Look, LookError
-from ricer.palette import GNOME_ACCENT_NAMES, YARU_ACCENT_HUES, hue_distance, terminal_transparency
+from ricer.palette import GNOME_ACCENT_NAMES, TERMINAL_BACKGROUND, YARU_ACCENT_HUES, hue_distance
 from ricer.paths import THEME_NAME, Paths
 
 BACKGROUND = "/org/gnome/desktop/background/"
@@ -201,21 +201,18 @@ def _bar(look: Look, caps: Capabilities, plan: Plan, paths: Paths, yaru: str) ->
             "(ricer setup).")
 
 
-def _transparency(look: Look) -> int:
-    """Percent of the terminal's background that lets the desktop through."""
-    return look.terminal.get("transparency", terminal_transparency(look.style.fill))
-
-
 def _terminal(look: Look, caps: Capabilities, settings: dict) -> None:
     if not caps.terminal_profile:
         return
     profile = f"{TERMINAL_PROFILES}:{caps.terminal_profile}/"
     settings[profile + "use-theme-colors"] = gv(False)
+    # Opaque on a neutral background for every look, saved ones included, so the wallpaper's
+    # colour never reaches the terminal. Looks saved before 0.6 still carry a tinted background
+    # and a transparency; both are ignored.
     if caps.terminal_glass:
         settings[profile + "use-theme-transparency"] = gv(False)
-        settings[profile + "use-transparent-background"] = gv(True)
-        settings[profile + "background-transparency-percent"] = gv(_transparency(look))
-    settings[profile + "background-color"] = gv(look.terminal["background"])
+        settings[profile + "use-transparent-background"] = gv(False)
+    settings[profile + "background-color"] = gv(TERMINAL_BACKGROUND)
     settings[profile + "foreground-color"] = gv(look.terminal["foreground"])
     settings[profile + "bold-color-same-as-fg"] = gv(True)
     settings[profile + "palette"] = gv(look.terminal["palette"])
@@ -291,9 +288,7 @@ def _windows(look: Look, caps: Capabilities, plan: Plan, paths: Paths, theme: st
                             f"your own copy of {theme} in {paths.themes_dir}, which ricer leaves alone.")
         return
 
-    # a see-through terminal gets a frame to match
-    glass = 1 - _transparency(look) / 100 if caps.terminal_profile and caps.terminal_glass else None
-    css = gtk_theme.render(stock, look, glass)
+    css = gtk_theme.render(stock, look)
     sheet = paths.sheets_dir / gtk_theme.sheet_name(css)
     plan.sheets[sheet] = css
     bundle = folder / "gtk.gresource"

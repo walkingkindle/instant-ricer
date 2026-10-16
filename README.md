@@ -70,8 +70,8 @@ System stats and a media player can sit in the bar itself, so they stay visible 
 full-screen windows.
 
 **Windows** take the colour of the look's cards and its accent, and the outline its cards
-have. GNOME Terminal becomes one pane of tinted glass, title bar included: more see-through
-where the look's cards are fainter, less over a bright wallpaper so text stays readable.
+have. GNOME Terminal takes the look's text colours on a plain, opaque dark grey, so the
+wallpaper's colour never tints it.
 The terminal and GTK 3 apps change at once; libadwaita apps (Files, Settings) take the
 colours when they are next opened.
 
@@ -113,7 +113,7 @@ what it skipped. `ricer status` lists it.
 | The bar's clock and cards in its menu | ricer's own extension, on GNOME 46 (`ricer setup` copies it in) |
 | Blur | [Blur my Shell](https://extensions.gnome.org/extension/3193/blur-my-shell/) |
 | Dock styling | Ubuntu Dock or [Dash to Dock](https://extensions.gnome.org/extension/307/dash-to-dock/) |
-| Terminal colours | GNOME Terminal (see-through where its build supports that, as on Ubuntu) |
+| Terminal colours | GNOME Terminal |
 | Window colours in GTK 3 apps and the terminal's frame | the Yaru app theme (Ubuntu) |
 | Accent-matched app theme | Yaru variants (Ubuntu); on GNOME 47+ the system accent colour is set instead |
 | Other icons and cursor | Papirus-Dark and Bibata-Modern-Ice, used only if installed |

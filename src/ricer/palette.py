@@ -180,29 +180,21 @@ def build_palette(colors: list[tuple[str, float]], dials: Dials,
     )
 
 
-def terminal_transparency(fill: float, brightness: float | None = None) -> int:
-    """How see-through the terminal is, in percent: more where the look's cards are fainter.
-
-    A bright wallpaper lowers it, because text has to stay readable over whatever shows
-    through. Without a wallpaper to judge by, it stays at the cautious end.
-    """
-    wanted = 10 + 16 * (1 - max(0.25, min(1.0, fill))) / 0.75
-    limit = 20 if brightness is None else 30 - 22 * brightness
-    return round(max(5, min(wanted, limit)))
+# The terminal sits on plain dark grey whatever the look: a wallpaper's colour never tints it.
+TERMINAL_BACKGROUND = "#1e1e1e"
 
 
 def terminal_colors(palette: Palette) -> dict:
-    """A 16-colour terminal scheme that sits on the card colour and shares the accent's punch."""
+    """A 16-colour terminal scheme on a neutral background that shares the accent's punch."""
     base_hue = hue_of(palette.card)
     saturation = max(0.45, saturation_of(palette.accent) * 0.85)
     hues = (0, 110, 45, 220, 290, 185)                       # red green yellow blue magenta cyan
     normal = [hsl(h, saturation, 0.68) for h in hues]
     bright = [hsl(h, saturation, 0.76) for h in hues]
     return {
-        # as coloured as the cards are, so the terminal reads as one of the look's surfaces
-        "background": hsl(base_hue, max(0.25, min(0.45, saturation_of(palette.card))), 0.11),
+        "background": TERMINAL_BACKGROUND,
         "foreground": hsl(base_hue, 0.35, 0.86),
-        "palette": [hsl(base_hue, 0.25, 0.09), *normal, hsl(base_hue, 0.20, 0.72),
+        "palette": [hsl(0, 0, 0.09), *normal, hsl(base_hue, 0.20, 0.72),
                     hsl(base_hue, 0.20, 0.34), *bright, hsl(base_hue, 0.35, 0.90)],
     }
 

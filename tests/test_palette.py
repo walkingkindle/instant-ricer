@@ -111,6 +111,8 @@ def test_terminal_scheme_has_sixteen_readable_colours():
     scheme = palette.terminal_colors(made)
     assert len(scheme["palette"]) == 16
     assert palette.contrast_ratio(scheme["foreground"], scheme["background"]) >= 7
+    # the background is plain grey, never the wallpaper's colour
+    assert scheme["background"] == palette.TERMINAL_BACKGROUND and palette.saturation_of(scheme["background"]) == 0
 
 
 @pytest.mark.parametrize("color, name", [("#2f7fe0", "blue"), ("#e0407a", "red"),

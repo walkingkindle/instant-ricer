@@ -11,7 +11,7 @@ from ricer.capabilities import MEDIA_CONTROLS_UUID, RICER_UUID, VITALS_UUID
 from ricer.engine import ApplyError, Engine, build_plan, sibling_theme
 from ricer.generator import generate
 from ricer.look import Bar, Dials, Dock, WidgetSpec
-from ricer.palette import hsl, terminal_transparency
+from ricer.palette import TERMINAL_BACKGROUND, hsl
 
 from conftest import PROFILE
 
@@ -77,7 +77,7 @@ def test_plan_on_a_full_desktop_covers_everything(look, full_caps, paths):
     assert s[engine.INTERFACE + "color-scheme"] == "'prefer-dark'"
     assert s[engine.USER_THEME_NAME] == "'Ricer'"
     assert "@import" in plan.files[paths.shell_theme_file]
-    assert s[TERMINAL + "background-color"] == gv(look.terminal["background"])
+    assert s[TERMINAL + "background-color"] == gv(TERMINAL_BACKGROUND)
     assert s[TERMINAL + "palette"] == gv(look.terminal["palette"])
     assert engine.INTERFACE + "accent-color" not in s        # this desktop has no such setting
     assert "ricer.widgets.daemon" in plan.files[paths.autostart_file]
@@ -464,8 +464,7 @@ def test_plan_recolours_the_app_theme_under_its_own_name(look, full_caps, paths,
     stubs, links = shadow(paths, theme)
     (sheet, css), = plan.sheets.items()
     stock = gtk_theme.stock_sheet(Path(stock_themes[theme]))
-    opacity = 1 - look.terminal["transparency"] / 100
-    assert css == gtk_theme.render(stock, look, opacity) and f", {round(opacity, 2)});" in css
+    assert css == gtk_theme.render(stock, look) and "terminal-window" not in css
     assert sheet == paths.sheets_dir / gtk_theme.sheet_name(css)
     assert all(plan.files[stub] == gtk_theme.stub(sheet) for stub in stubs)
     # both folders borrow the pictures of the theme the stylesheet came from
@@ -473,18 +472,17 @@ def test_plan_recolours_the_app_theme_under_its_own_name(look, full_caps, paths,
     assert plan.blocks == {paths.gtk4_css_file: gtk_theme.adwaita(look)}
 
 
-def test_the_terminal_is_as_see_through_as_the_look_says(look, full_caps, paths):
-    key = TERMINAL + "background-transparency-percent"
-    assert build_plan(look, full_caps, paths).settings[key] == str(look.terminal["transparency"])
+def test_the_terminal_is_opaque_and_neutral_whatever_the_look_says(look, full_caps, paths):
+    # a look saved before 0.6, tinted and see-through, still gets a plain opaque terminal
+    older = dataclasses.replace(look, terminal={**look.terminal, "background": "#161523", "transparency": 20})
+    s = build_plan(older, full_caps, paths).settings
+    assert s[TERMINAL + "use-transparent-background"] == gv(False)
+    assert TERMINAL + "background-transparency-percent" not in s
+    assert s[TERMINAL + "background-color"] == gv(TERMINAL_BACKGROUND)
 
-    colours_only = {name: value for name, value in look.terminal.items() if name != "transparency"}
-    older = dataclasses.replace(look, terminal=colours_only)             # saved before 0.3
-    assert build_plan(older, full_caps, paths).settings[key] == str(terminal_transparency(look.style.fill))
-
-    opaque = build_plan(look, dataclasses.replace(full_caps, terminal_glass=False), paths)
-    assert not any(path.startswith(TERMINAL) and "transparen" in path for path in opaque.settings)
-    assert opaque.settings[TERMINAL + "background-color"] == gv(look.terminal["background"])
-    assert "terminal-window" not in next(iter(opaque.sheets.values()))
+    plain = build_plan(look, dataclasses.replace(full_caps, terminal_glass=False), paths)
+    assert not any(path.startswith(TERMINAL) and "transparen" in path for path in plain.settings)
+    assert plain.settings[TERMINAL + "background-color"] == gv(TERMINAL_BACKGROUND)
 
 
 def test_apply_installs_window_colours_and_tells_running_apps(look, full_caps, paths, backend, stock_themes):
